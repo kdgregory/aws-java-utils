@@ -2,6 +2,7 @@
 package com.kdgregory.aws.utils.kinesis;
 
 import java.util.List;
+import java.util.Map;
 
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.model.*;
@@ -21,7 +22,7 @@ public class KinesisUtils
      *                      method will retry the operation every 100 milliseconds
      *                      until this timeout expires.
      */
-    public static List<Shard> describeStream(AmazonKinesis client, long timeout)
+    public static List<Shard> describeShards(AmazonKinesis client, long timeout)
     {
         throw new UnsupportedOperationException("FIXME - implement");
     }
@@ -72,6 +73,42 @@ public class KinesisUtils
      *  @param  streamName  The name of the stream.
      */
     public static void deleteStream(AmazonKinesis client, String streamName)
+    {
+        throw new UnsupportedOperationException("FIXME - implement");
+    }
+    
+    
+    /**
+     *  Retrieves shard iterators for the specified stream. The goal of this
+     *  function is to allow uninterrupted reading of a stream based on saved
+     *  offsets, so the following rules are applied to the results:
+     *  <ul>
+     *  <li> For any currently-open shard that is in the map, this function
+     *       will return an <code>AFTER_SEQUENCE_NUMBER</code> iterator (this
+     *       is the normal case).  
+     *  <li> For any closed shard that is in the map, this function will return
+     *       an <code>AFTER_SEQUENCE_NUMBER</code> iterator if-and-only-if the
+     *       last sequence number in the shard's range is greater than that in
+     *       the supplied map.
+     *  <li> For any closed shard that is in the map, where the last sequence
+     *       number in the shard is equal to the number in the map, this function
+     *       will return a <code>TRIM_HORIZON</code> iterator (so reading will
+     *       start with the first untrimmed record in the stream).
+     *  <li> For any shard in the stream that is not represented in the map, this
+     *       function will return a <code>TRIM_HORIZON</code> iterator (so will
+     *       identify new shards).
+     *  </ul>
+     *  To start reading a stream from its beginning, supply an empty map. 
+     *  
+     *  @param  client      The AWS client used to make requests.
+     *  @param  streamName  The name of the stream.
+     *  @param  seqnums     A map associating shard ID with the sequence number
+     *                      of the last record read from that shard.
+     *                      
+     *  @return A map associating shard ID with an iterator for that shard.                    
+     */
+    public static Map<String,String> retrieveShardIterators(
+        AmazonKinesis client, String streamName, Map<String,String> seqnums)
     {
         throw new UnsupportedOperationException("FIXME - implement");
     }
