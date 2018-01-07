@@ -7,20 +7,26 @@ that there are more records, and you have to keep repeating the call until the r
 is null. All the while being prepared to handle rate-limiting or other exceptions.
 
 
-## Package structure
+## Directory structure
 
-This library contains two root packages: `com.kdgregory.aws.utils` and `com.kdgregory.aws.test`.
-Under these root packages are per-service packages, named according to the service package in
-the AWS SDK.
+This project contains three directories:
 
-Each of the `utils` service packages will contain at least one class, `FooUtil`, which provides
-static utility mthods for service Foo. There may also be additional instantiable classes.
+* `utils` is the main library of utility classes.
+* `test-helpers` contains classes that are useful for writing AWS tests. These are primarily
+  mock objects.
+* `integration-tests` are tests that exercise the `utils` classes against actual AWS services.
+  *Beware:* running these tests will incur service charges.
 
-The `test` packages contain classes intended to support testing of client code that uses these
-services; they primarily hold mock objects.
 
-> This package structure may change; in particular, the test packages may be moved into their
-  own library.
+## Package Structure
+
+The top-level package is `com.kdgregory.aws.utils`. Under this are packages named after AWS
+services (example: `com.kdgregory.aws.utils.kinesis`).
+
+Within each package there is a class containing static utility methods, named after the service
+(example: `KinesisUtil`). There may also be instantiable classes (example: `KinesisReader`). In
+the test project there will typically be a mock client object (example: `MockAmazonKinesis`)
+and may be a class containing static utility methods (but that's rare).
 
 
 ## Versioning
