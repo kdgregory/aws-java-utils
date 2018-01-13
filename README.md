@@ -9,11 +9,9 @@ is null. All the while being prepared to handle rate-limiting or other exception
 
 ## Directory structure
 
-This project contains three directories:
+This project contains two directories:
 
 * `utils` is the main library of utility classes.
-* `test-helpers` contains classes that are useful for writing AWS tests. These are primarily
-  mock objects.
 * `integration-tests` are tests that exercise the `utils` classes against actual AWS services.
   *Beware:* running these tests will incur service charges.
 
