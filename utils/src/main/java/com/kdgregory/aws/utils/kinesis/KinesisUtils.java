@@ -22,27 +22,46 @@ import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.model.*;
 
 /**
- *  General utility methods for Kinesis.
+ *  General utility methods for Kinesis. These methods perform retries with
+ *  exponential backoff when throttled, and handle the case where AWS requires
+ *  multiple calls to retrieve all information.
  */
 public class KinesisUtils
 {
     /**
-     *  Executes a <code>DescribeStream</code> request, retrying with delay if
-     *  the request fails due to throttling. Returns null if the stream doesn't
-     *  exist or could not be described within the timeout. Otherwise returns
-     *  the stream description (not the API result).
+     *  Executes a <code>DescribeStream</code> request, returning the stream
+     *  description from the response. Will return null if the stream does not
+     *  exist, cannot be read within the specified timeout, or if the thread
+     *  is interrupted.
      */
     public static StreamDescription describeStream(AmazonKinesis client, DescribeStreamRequest request, long timeout)
     {
-        try
+        long currentSleep = 100;
+        long timeoutAt = System.currentTimeMillis() + timeout;
+        while (System.currentTimeMillis() < timeoutAt)
         {
-            return client.describeStream(request).getStreamDescription();
+            try
+            {
+                return client.describeStream(request).getStreamDescription();
+            }
+            catch (ResourceNotFoundException ex)
+            {
+                return null;
+            }
+            catch (LimitExceededException ex)
+            {
+                try
+                {
+                    Thread.sleep(currentSleep);
+                }
+                catch (InterruptedException ex2)
+                {
+                    return null;
+                }
+                currentSleep *= 2;
+            }
         }
-        catch (ResourceNotFoundException ex)
-        {
-            System.out.println("caught!");
-            return null;
-        }
+        return null;
     }
 
 
@@ -60,12 +79,14 @@ public class KinesisUtils
     public static List<Shard> describeShards(AmazonKinesis client, String streamName, long timeout)
     {
         List<Shard> result = new ArrayList<Shard>();
+        long timeoutAt = System.currentTimeMillis() + timeout;
         String lastShardId = null;
         do
         {
+            long currentTimeout = timeoutAt - System.currentTimeMillis();
             DescribeStreamRequest request = new DescribeStreamRequest().withStreamName(streamName);
             if (lastShardId != null) request.setExclusiveStartShardId(lastShardId);
-            StreamDescription description = describeStream(client, request, timeout);
+            StreamDescription description = describeStream(client, request, currentTimeout);
             if (description == null) return null;
             List<Shard> shards = description.getShards();
             result.addAll(shards);
