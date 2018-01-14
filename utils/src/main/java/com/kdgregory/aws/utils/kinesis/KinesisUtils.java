@@ -21,6 +21,7 @@ import java.util.Map;
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.model.*;
 
+
 /**
  *  General utility methods for Kinesis. These methods perform retries with
  *  exponential backoff when throttled, and handle the case where AWS requires
@@ -33,6 +34,12 @@ public class KinesisUtils
      *  description from the response. Will return null if the stream does not
      *  exist, cannot be read within the specified timeout, or if the thread
      *  is interrupted.
+     *
+     *  @param  client          The AWS client used to make requests.
+     *  @param  request         The request that's passed to the client.
+     *  @param  timeout         The total number of milliseconds to attempt retries
+     *                          due to throttling. The initial retry is 100 millis,
+     *                          and this doubles for each retry.
      */
     public static StreamDescription describeStream(AmazonKinesis client, DescribeStreamRequest request, long timeout)
     {
@@ -68,13 +75,14 @@ public class KinesisUtils
     /**
      *  A wrapper around <code>DescribeStream</code> that retrieves all shard
      *  descriptions and retries if throttled. Returns null if the stream does
-     *  not exist or we could not retrieve all shards within the timeout.
+     *  not exist, the calling thread was interrupted, or we could not retrieve
+     *  all shards within the timeout (this method does not return partial
+     *  results).
      *
-     *  @param  client      The AWS client used to make requests.
-     *  @param  streamName  The stream to describe.
-     *  @param  timeout     The total number of milliseconds to attempt retries. This
-     *                      method will retry the operation every 100 milliseconds
-     *                      until this timeout expires.
+     *  @param  client          The AWS client used to make requests.
+     *  @param  streamName      Identifies the stream to describe.
+     *  @param  timeout         The total number of milliseconds to attempt retries due
+     *                          to throttling.
      */
     public static List<Shard> describeShards(AmazonKinesis client, String streamName, long timeout)
     {
@@ -99,12 +107,33 @@ public class KinesisUtils
 
 
     /**
-     *  Retrieves the named stream's status, retrying if rate-limited. Returns the
-     *  status, null if the stream does not exist.
+     *  Repeatedly calls {@link #describeStream} until the stream's status is
+     *  the desired value, the calling thrad is interrupted, or the timeout
+     *  expires. Returns the last retreived status value (which may be null
+     *  even if the actual status is not, due to timeout or interruption).
+     *
+     *  @param  client          The AWS client used to make requests.
+     *  @param  streamName      Identifies the stream to describe.
+     *  @param  desiredStatus   The desired stream status.
+     *  @param  timeout         The total number of milliseconds to attempt retries due
+     *                          to throttling.
      */
-    public static String describeStreamStatus(AmazonKinesis client, String streamName)
+    public static StreamStatus waitForStatus(AmazonKinesis client, String streamName, StreamStatus desiredStatus, long timeout)
     {
-        throw new UnsupportedOperationException("FIXME - implement");
+        StreamStatus lastStatus = null;
+        long timeoutAt = System.currentTimeMillis() + timeout;
+        long remainingTimeout = 0;
+        DescribeStreamRequest request = new DescribeStreamRequest().withStreamName(streamName);
+
+        while ((remainingTimeout = timeoutAt - System.currentTimeMillis()) > 0)
+        {
+            StreamDescription desc = describeStream(client, request, remainingTimeout);
+            lastStatus = (desc != null)
+                       ? StreamStatus.valueOf(desc.getStreamStatus())
+                       : null;
+            if (lastStatus == desiredStatus) break;
+        }
+        return lastStatus;
     }
 
 

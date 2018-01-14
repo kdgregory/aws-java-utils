@@ -23,6 +23,8 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 import net.sf.kdgcommons.collections.CollectionUtil;
+import net.sf.kdgcommons.lang.ThreadUtil;
+import net.sf.kdgcommons.test.NumericAsserts;
 import net.sf.kdgcommons.test.SelfMock;
 
 import com.amazonaws.services.kinesis.AmazonKinesis;
@@ -124,7 +126,6 @@ public class TestKinesisUtils
 
         AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
         {
-
             @SuppressWarnings("unused")
             public DescribeStreamResult describeStream(DescribeStreamRequest request)
             {
@@ -159,7 +160,6 @@ public class TestKinesisUtils
 
         AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
         {
-
             @SuppressWarnings("unused")
             public DescribeStreamResult describeStream(DescribeStreamRequest request)
             {
@@ -177,5 +177,90 @@ public class TestKinesisUtils
         List<Shard> shards = KinesisUtils.describeShards(client, "example", 150);
         assertEquals("did not return anything", null, shards);
         assertEquals("number of calls", 3, invocationCount.get());
+    }
+
+
+    @Test
+    public void testWaitForStatusNormalOperation()
+    {
+        final AtomicInteger invocationCount = new AtomicInteger(0);
+
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public DescribeStreamResult describeStream(DescribeStreamRequest request)
+            {
+                assertEquals("stream name", "example", request.getStreamName());
+                StreamStatus status = (invocationCount.getAndIncrement() < 3)
+                                    ? StreamStatus.CREATING
+                                    : StreamStatus.ACTIVE;
+
+                return new DescribeStreamResult().withStreamDescription(
+                        new StreamDescription().withStreamStatus(status));
+            }
+        }.getInstance();
+
+        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, "example", StreamStatus.ACTIVE, 100);
+        assertEquals("status", StreamStatus.ACTIVE, lastStatus);
+        assertEquals("invocation count", 4, invocationCount.get());
+    }
+
+
+    @Test
+    public void testWaitForStatusTimeout()
+    {
+        final AtomicInteger invocationCount = new AtomicInteger(0);
+
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public DescribeStreamResult describeStream(DescribeStreamRequest request)
+            {
+                assertEquals("stream name", "example", request.getStreamName());
+                StreamStatus status = (invocationCount.getAndIncrement() < 3)
+                                    ? StreamStatus.CREATING
+                                    : StreamStatus.ACTIVE;
+                ThreadUtil.sleepQuietly(100);
+                return new DescribeStreamResult().withStreamDescription(
+                        new StreamDescription().withStreamStatus(status));
+            }
+        }.getInstance();
+
+        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, "example", StreamStatus.ACTIVE, 250);
+        assertEquals("status", StreamStatus.CREATING, lastStatus);
+        assertEquals("invocation count", 3, invocationCount.get());
+    }
+
+
+    @Test
+    public void testWaitForStatusWithThrottling()
+    {
+        final AtomicInteger invocationCount = new AtomicInteger(0);
+
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public DescribeStreamResult describeStream(DescribeStreamRequest request)
+            {
+                if (invocationCount.getAndIncrement() % 2 == 0)
+                {
+                    throw new LimitExceededException("");
+                }
+
+                StreamStatus status = (invocationCount.get() < 3)
+                                    ? StreamStatus.CREATING
+                                    : StreamStatus.ACTIVE;
+                return new DescribeStreamResult().withStreamDescription(
+                        new StreamDescription().withStreamStatus(status));
+            }
+        }.getInstance();
+
+        long start = System.currentTimeMillis();
+        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, "example", StreamStatus.ACTIVE, 500);
+        long finish = System.currentTimeMillis();
+
+        assertEquals("status", StreamStatus.ACTIVE, lastStatus);
+        assertEquals("invocation count", 4, invocationCount.get());
+        NumericAsserts.assertInRange(150L, 300L, (finish - start));
     }
 }
