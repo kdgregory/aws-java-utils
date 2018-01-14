@@ -17,6 +17,7 @@ package com.kdgregory.aws.utils.kinesis;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.Test;
 import static org.junit.Assert.*;
@@ -33,13 +34,25 @@ import com.amazonaws.services.kinesis.model.*;
  */
 public class TestKinesisUtils
 {
+//----------------------------------------------------------------------------
+//  Sample data -- only populated with fields that we actually use
+//----------------------------------------------------------------------------
+
+    private static final List<Shard> SHARDS_1 = Arrays.asList(
+                                        new Shard().withShardId("0001"),
+                                        new Shard().withShardId("0002"));
+    private static final List<Shard> SHARDS_2 = Arrays.asList(
+                                        new Shard().withShardId("0003"),
+                                        new Shard().withShardId("0004"));
+
+//----------------------------------------------------------------------------
+//  Testcases
+//----------------------------------------------------------------------------
+
     @Test
     public void testDescribeShardsSingleRetrieve() throws Exception
     {
-        // nope, this isn't a full description, but we're not testing a full return
-        final List<Shard> expected = Arrays.asList(
-                                        new Shard().withShardId("0001"),
-                                        new Shard().withShardId("0002"));
+        final List<Shard> expected = SHARDS_1;
 
         AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
         {
@@ -48,7 +61,7 @@ public class TestKinesisUtils
             {
                 assertEquals("request contains stream name", "example", request.getStreamName());
                 return new DescribeStreamResult().withStreamDescription(
-                        new StreamDescription().withShards(expected).withHasMoreShards(Boolean.FALSE));
+                        new StreamDescription().withShards(SHARDS_1).withHasMoreShards(Boolean.FALSE));
             }
         }.getInstance();
 
@@ -60,14 +73,7 @@ public class TestKinesisUtils
     @Test
     public void testDescribeShardsMultiRetrieve() throws Exception
     {
-        final List<Shard> return1 = Arrays.asList(
-                                        new Shard().withShardId("0001"),
-                                        new Shard().withShardId("0002"));
-        final List<Shard> return2 = Arrays.asList(
-                                        new Shard().withShardId("0003"),
-                                        new Shard().withShardId("0004"));
-
-        final List<Shard> expected = CollectionUtil.combine(new ArrayList<Shard>(), return1, return2);
+        final List<Shard> expected = CollectionUtil.combine(new ArrayList<Shard>(), SHARDS_1, SHARDS_2);
 
         AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
         {
@@ -78,12 +84,12 @@ public class TestKinesisUtils
                 if ("0002".equals(request.getExclusiveStartShardId()))
                 {
                     return new DescribeStreamResult().withStreamDescription(
-                            new StreamDescription().withShards(return2).withHasMoreShards(Boolean.FALSE));
+                            new StreamDescription().withShards(SHARDS_2).withHasMoreShards(Boolean.FALSE));
                 }
                 else
                 {
                     return new DescribeStreamResult().withStreamDescription(
-                            new StreamDescription().withShards(return1).withHasMoreShards(Boolean.TRUE));
+                            new StreamDescription().withShards(SHARDS_1).withHasMoreShards(Boolean.TRUE));
                 }
             }
         }.getInstance();
@@ -94,7 +100,7 @@ public class TestKinesisUtils
 
 
     @Test
-    public void testStreamNotAvailable() throws Exception
+    public void testDescribeShardsStreamNotAvailable() throws Exception
     {
         AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
         {
@@ -107,5 +113,69 @@ public class TestKinesisUtils
 
         List<Shard> shards = KinesisUtils.describeShards(client, "example", 1000);
         assertEquals("returned empty", null, shards);
+    }
+
+
+    @Test
+    public void testDescribeShardsRequestThrottling() throws Exception
+    {
+        final List<Shard> expected = CollectionUtil.combine(new ArrayList<Shard>(), SHARDS_1, SHARDS_2);
+        final AtomicInteger invocationCount = new AtomicInteger(0);
+
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+
+            @SuppressWarnings("unused")
+            public DescribeStreamResult describeStream(DescribeStreamRequest request)
+            {
+                if (invocationCount.getAndIncrement() % 2 == 0)
+                {
+                    throw new LimitExceededException("");
+                }
+
+                if ("0002".equals(request.getExclusiveStartShardId()))
+                {
+                    return new DescribeStreamResult().withStreamDescription(
+                            new StreamDescription().withShards(SHARDS_2).withHasMoreShards(Boolean.FALSE));
+                }
+                else
+                {
+                    return new DescribeStreamResult().withStreamDescription(
+                            new StreamDescription().withShards(SHARDS_1).withHasMoreShards(Boolean.TRUE));
+                }
+            }
+        }.getInstance();
+
+        List<Shard> shards = KinesisUtils.describeShards(client, "example", 1000);
+        assertEquals("returned expected list", expected, shards);
+        assertEquals("number of calls", 4, invocationCount.get());
+    }
+
+
+    @Test
+    public void testDescribeShardsTimoutExceeded() throws Exception
+    {
+        final AtomicInteger invocationCount = new AtomicInteger(0);
+
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+
+            @SuppressWarnings("unused")
+            public DescribeStreamResult describeStream(DescribeStreamRequest request)
+            {
+                // we'll return one batch but then pretend to be throttled
+                if (invocationCount.getAndIncrement() > 0)
+                {
+                    throw new LimitExceededException("");
+                }
+
+                return new DescribeStreamResult().withStreamDescription(
+                        new StreamDescription().withShards(SHARDS_1).withHasMoreShards(Boolean.TRUE));
+            }
+        }.getInstance();
+
+        List<Shard> shards = KinesisUtils.describeShards(client, "example", 150);
+        assertEquals("did not return anything", null, shards);
+        assertEquals("number of calls", 3, invocationCount.get());
     }
 }
