@@ -21,6 +21,8 @@ import java.util.Map;
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.model.*;
 
+import com.kdgregory.aws.utils.CommonUtils;
+
 
 /**
  *  General utility methods for Kinesis. These methods perform retries with
@@ -57,14 +59,7 @@ public class KinesisUtils
             }
             catch (LimitExceededException ex)
             {
-                try
-                {
-                    Thread.sleep(currentSleep);
-                }
-                catch (InterruptedException ex2)
-                {
-                    return null;
-                }
+                if (CommonUtils.sleepQuietly(currentSleep)) return null;
                 currentSleep *= 2;
             }
         }
@@ -143,30 +138,61 @@ public class KinesisUtils
      *  @param  client      The AWS client used to make requests.
      *  @param  streamName  The name of the stream.
      *  @param  numShards   The number of shards to create.
+     *  @param  timeout     The number of milliseconds to wait for the stream to become available (this
+     *                      also controls the number of attempts that we'll make to create the stream
+     *                      if throttled).
+     *
+     *  @return The final status retrieved. If this is <code>null</code> it means that thes stream
+     *          was not created. Caller should only use the stream if it's <code>ACTIVE</code>/
+     *
+     *  @throws IllegalArgumentException if thrown by the underlying calls (ie, this is not caught).
      */
-    public static void createStream(AmazonKinesis client, String streamName, int numShards)
+    public static StreamStatus createStream(AmazonKinesis client, String streamName, int numShards, long timeout)
     {
-        throw new UnsupportedOperationException("FIXME - implement");
+        long currentSleep = 100;
+        long abortAt = System.currentTimeMillis() + timeout;
+        while (System.currentTimeMillis() < abortAt)
+        {
+            CreateStreamRequest request = new CreateStreamRequest()
+                                              .withStreamName(streamName)
+                                              .withShardCount(numShards);
+            try
+            {
+                client.createStream(request);
+                break;
+            }
+            catch (LimitExceededException ex)
+            {
+                if (CommonUtils.sleepQuietly(currentSleep)) return null;
+                currentSleep *= 2;
+            }
+            catch (ResourceInUseException ex)
+            {
+                // the documentation isn't very clear on this exception; it's thrown when
+                // the stream already exists
+                break;
+            }
+        }
+
+        return waitForStatus(client, streamName, StreamStatus.ACTIVE, (abortAt - System.currentTimeMillis()));
     }
 
 
     /**
-     *  Creates a stream with non-standard retention period and waits for
-     *  it to become available.
+     *  Updates a stream's retention period and waits for it to become available again.
      *
      *  @param  client      The AWS client used to make requests.
      *  @param  streamName  The name of the stream.
-     *  @param  numShards   The number of shards to create.
      *  @param  retention   The retention period (hours)
      */
-    public static void createStream(AmazonKinesis client, String streamName, int numShards, int retention)
+    public static void updateRetentionPeriod(AmazonKinesis client, String streamName, int retention)
     {
         throw new UnsupportedOperationException("FIXME - implement");
     }
 
 
     /**
-     *  Deletes a stream and waits for it to no longer be available.
+     *  Deletes a stream.
      *
      *  @param  client      The AWS client used to make requests.
      *  @param  streamName  The name of the stream.

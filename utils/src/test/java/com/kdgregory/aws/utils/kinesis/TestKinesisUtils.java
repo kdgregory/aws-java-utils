@@ -263,4 +263,119 @@ public class TestKinesisUtils
         assertEquals("invocation count", 4, invocationCount.get());
         NumericAsserts.assertInRange(150L, 300L, (finish - start));
     }
+
+
+    @Test
+    public void testCreateStreamHappyPath() throws Exception
+    {
+        final AtomicInteger describeInvocationCount = new AtomicInteger(0);
+        final AtomicInteger createInvocationCount = new AtomicInteger(0);
+
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public DescribeStreamResult describeStream(DescribeStreamRequest request)
+            {
+                assertEquals("stream name passed to describeStream", "example", request.getStreamName());
+
+                int invocationCount = describeInvocationCount.getAndIncrement();
+                if (invocationCount < 3)
+                    throw new ResourceNotFoundException("");
+
+                StreamStatus status = (invocationCount < 6)
+                                    ? StreamStatus.CREATING
+                                    : StreamStatus.ACTIVE;
+                return new DescribeStreamResult().withStreamDescription(
+                        new StreamDescription().withStreamStatus(status));
+            }
+
+            @SuppressWarnings("unused")
+            public CreateStreamResult createStream(CreateStreamRequest request)
+            {
+                assertEquals("stream name passed to createStream", "example", request.getStreamName());
+                assertEquals("shard count passed to createStream", 3,         request.getShardCount().intValue());
+                createInvocationCount.incrementAndGet();
+                return new CreateStreamResult();
+            }
+        }.getInstance();
+
+        long start = System.currentTimeMillis();
+        StreamStatus status = KinesisUtils.createStream(client, "example", 3, 1000L);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertEquals("stream status",                   StreamStatus.ACTIVE, status);
+        assertTrue("no delays",                         elapsed < 100);
+        assertEquals("invocations of createStream",     1, createInvocationCount.get());
+        assertEquals("invocations of describeStream",   7, describeInvocationCount.get());
+    }
+
+
+    @Test
+    public void testCreateStreamThrottling() throws Exception
+    {
+        final AtomicInteger describeInvocationCount = new AtomicInteger(0);
+        final AtomicInteger createInvocationCount = new AtomicInteger(0);
+
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public DescribeStreamResult describeStream(DescribeStreamRequest request)
+            {
+                describeInvocationCount.getAndIncrement();
+                return new DescribeStreamResult().withStreamDescription(
+                        new StreamDescription().withStreamStatus(StreamStatus.ACTIVE));
+            }
+
+            @SuppressWarnings("unused")
+            public CreateStreamResult createStream(CreateStreamRequest request)
+            {
+                if (createInvocationCount.getAndIncrement() < 2)
+                    throw new LimitExceededException("");
+                else
+                    return new CreateStreamResult();
+            }
+        }.getInstance();
+
+        long start = System.currentTimeMillis();
+        StreamStatus status = KinesisUtils.createStream(client, "example", 3, 1000L);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertEquals("stream status",                               StreamStatus.ACTIVE, status);
+        assertTrue("request delay, low (was: " + elapsed + ")",     elapsed >= 290);
+        assertTrue("request delay, high (was: " + elapsed + ")",    elapsed < 400);
+        assertEquals("invocations of createStream",                 3, createInvocationCount.get());
+        assertEquals("invocations of describeStream",               1, describeInvocationCount.get());
+    }
+
+
+    @Test
+    public void testCreateStreamAlreadyExists() throws Exception
+    {
+        final AtomicInteger describeInvocationCount = new AtomicInteger(0);
+        final AtomicInteger createInvocationCount = new AtomicInteger(0);
+
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public DescribeStreamResult describeStream(DescribeStreamRequest request)
+            {
+                describeInvocationCount.getAndIncrement();
+                return new DescribeStreamResult().withStreamDescription(
+                        new StreamDescription().withStreamStatus(StreamStatus.ACTIVE));
+            }
+
+            @SuppressWarnings("unused")
+            public CreateStreamResult createStream(CreateStreamRequest request)
+            {
+                createInvocationCount.getAndIncrement();
+                throw new ResourceInUseException("");
+            }
+        }.getInstance();
+
+        StreamStatus status = KinesisUtils.createStream(client, "example", 3, 500L);
+
+        assertEquals("stream status",                               StreamStatus.ACTIVE, status);
+        assertEquals("invocations of createStream",                 1, createInvocationCount.get());
+        assertEquals("invocations of describeStream",               1, describeInvocationCount.get());
+    }
 }
