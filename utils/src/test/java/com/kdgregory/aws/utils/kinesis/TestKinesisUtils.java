@@ -23,9 +23,8 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 import net.sf.kdgcommons.collections.CollectionUtil;
-import net.sf.kdgcommons.lang.ThreadUtil;
-import net.sf.kdgcommons.test.NumericAsserts;
 import net.sf.kdgcommons.test.SelfMock;
+import static net.sf.kdgcommons.test.NumericAsserts.*;
 
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.model.*;
@@ -191,7 +190,7 @@ public class TestKinesisUtils
             public DescribeStreamResult describeStream(DescribeStreamRequest request)
             {
                 assertEquals("stream name", "example", request.getStreamName());
-                StreamStatus status = (invocationCount.getAndIncrement() < 3)
+                StreamStatus status = (invocationCount.getAndIncrement() < 2)
                                     ? StreamStatus.CREATING
                                     : StreamStatus.ACTIVE;
 
@@ -200,9 +199,13 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, "example", StreamStatus.ACTIVE, 100);
-        assertEquals("status", StreamStatus.ACTIVE, lastStatus);
-        assertEquals("invocation count", 4, invocationCount.get());
+        long start = System.currentTimeMillis();
+        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, "example", StreamStatus.ACTIVE, 500);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertEquals("status",              StreamStatus.ACTIVE, lastStatus);
+        assertEquals("invocation count",    3, invocationCount.get());
+        assertApproximate("elapsed time",   200, elapsed, 10);
     }
 
 
@@ -217,18 +220,19 @@ public class TestKinesisUtils
             public DescribeStreamResult describeStream(DescribeStreamRequest request)
             {
                 assertEquals("stream name", "example", request.getStreamName());
-                StreamStatus status = (invocationCount.getAndIncrement() < 3)
-                                    ? StreamStatus.CREATING
-                                    : StreamStatus.ACTIVE;
-                ThreadUtil.sleepQuietly(100);
+                invocationCount.getAndIncrement();
                 return new DescribeStreamResult().withStreamDescription(
-                        new StreamDescription().withStreamStatus(status));
+                        new StreamDescription().withStreamStatus(StreamStatus.CREATING));
             }
         }.getInstance();
 
+        long start = System.currentTimeMillis();
         StreamStatus lastStatus = KinesisUtils.waitForStatus(client, "example", StreamStatus.ACTIVE, 250);
-        assertEquals("status", StreamStatus.CREATING, lastStatus);
-        assertEquals("invocation count", 3, invocationCount.get());
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertEquals("status",              StreamStatus.CREATING, lastStatus);
+        assertEquals("invocation count",    3, invocationCount.get());
+        assertApproximate("elapsed time",   300, elapsed, 10);
     }
 
 
@@ -242,12 +246,13 @@ public class TestKinesisUtils
             @SuppressWarnings("unused")
             public DescribeStreamResult describeStream(DescribeStreamRequest request)
             {
-                if (invocationCount.getAndIncrement() % 2 == 0)
+                int localCount = invocationCount.getAndIncrement();
+                if (localCount < 2)
                 {
                     throw new LimitExceededException("");
                 }
 
-                StreamStatus status = (invocationCount.get() < 3)
+                StreamStatus status = (localCount < 3)
                                     ? StreamStatus.CREATING
                                     : StreamStatus.ACTIVE;
                 return new DescribeStreamResult().withStreamDescription(
@@ -255,13 +260,19 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
+        // the expected sequence of calls:
+        //  - limit exceeded, sleep for 100 ms
+        //  - limit exceeded, sleep for 200 ms
+        //  - return creating, sleep for 100 ms
+        //  - return active, no sleep
+
         long start = System.currentTimeMillis();
         StreamStatus lastStatus = KinesisUtils.waitForStatus(client, "example", StreamStatus.ACTIVE, 500);
-        long finish = System.currentTimeMillis();
+        long elapsed = System.currentTimeMillis() - start;
 
-        assertEquals("status", StreamStatus.ACTIVE, lastStatus);
-        assertEquals("invocation count", 4, invocationCount.get());
-        NumericAsserts.assertInRange(150L, 300L, (finish - start));
+        assertEquals("status",              StreamStatus.ACTIVE, lastStatus);
+        assertEquals("invocation count",    4, invocationCount.get());
+        assertApproximate("elapsed time",   400, elapsed, 10);
     }
 
 
@@ -279,10 +290,10 @@ public class TestKinesisUtils
                 assertEquals("stream name passed to describeStream", "example", request.getStreamName());
 
                 int invocationCount = describeInvocationCount.getAndIncrement();
-                if (invocationCount < 3)
+                if (invocationCount < 2)
                     throw new ResourceNotFoundException("");
 
-                StreamStatus status = (invocationCount < 6)
+                StreamStatus status = (invocationCount < 4)
                                     ? StreamStatus.CREATING
                                     : StreamStatus.ACTIVE;
                 return new DescribeStreamResult().withStreamDescription(
@@ -299,14 +310,21 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
+        // the expected sequence of calls:
+        //  - resource not found, sleep for 100 ms
+        //  - resource not found, sleep for 100 ms
+        //  - creating, sleep for 100 ms
+        //  - creating, sleep for 100 ms
+        //  - active, no sleep
+
         long start = System.currentTimeMillis();
         StreamStatus status = KinesisUtils.createStream(client, "example", 3, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("stream status",                   StreamStatus.ACTIVE, status);
-        assertTrue("no delays",                         elapsed < 100);
         assertEquals("invocations of createStream",     1, createInvocationCount.get());
-        assertEquals("invocations of describeStream",   7, describeInvocationCount.get());
+        assertEquals("invocations of describeStream",   5, describeInvocationCount.get());
+        assertApproximate("elapsed time",               400, elapsed, 10);
     }
 
 
