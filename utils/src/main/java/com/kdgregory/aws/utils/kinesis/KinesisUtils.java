@@ -102,10 +102,10 @@ public class KinesisUtils
 
 
     /**
-     *  Repeatedly calls {@link #describeStream} until the stream's status is
-     *  the desired value, the calling thrad is interrupted, or the timeout
-     *  expires. Returns the last retreived status value (which may be null
-     *  even if the actual status is not, due to timeout or interruption).
+     *  Repeatedly calls {@link #describeStream} (with a pause between calls) until
+     *  the stream's status is the desired value, the calling thrad is interrupted,
+     *  or the timeout expires. Returns the last retrieved status value (which may
+     *  be null even if the actual status is not, due to timeout or interruption).
      *
      *  @param  client          The AWS client used to make requests.
      *  @param  streamName      Identifies the stream to describe.
@@ -127,6 +127,9 @@ public class KinesisUtils
                        ? StreamStatus.valueOf(desc.getStreamStatus())
                        : null;
             if (lastStatus == desiredStatus) break;
+
+            // sleep to avoid throttling
+            CommonUtils.sleepQuietly(100);
         }
         return lastStatus;
     }
