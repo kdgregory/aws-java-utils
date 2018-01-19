@@ -354,13 +354,17 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
+        // expected calls:
+        //  - throttled, sleep for 100 ms
+        //  - throttled, sleep for 200 ms
+        //  - success
+
         long start = System.currentTimeMillis();
         StreamStatus status = KinesisUtils.createStream(client, "example", 3, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("stream status",                               StreamStatus.ACTIVE, status);
-        assertTrue("request delay, low (was: " + elapsed + ")",     elapsed >= 290);
-        assertTrue("request delay, high (was: " + elapsed + ")",    elapsed < 400);
+        assertApproximate("elapsed time",                           300, elapsed, 10);
         assertEquals("invocations of createStream",                 3, createInvocationCount.get());
         assertEquals("invocations of describeStream",               1, describeInvocationCount.get());
     }
@@ -395,5 +399,79 @@ public class TestKinesisUtils
         assertEquals("stream status",                               StreamStatus.ACTIVE, status);
         assertEquals("invocations of createStream",                 1, createInvocationCount.get());
         assertEquals("invocations of describeStream",               1, describeInvocationCount.get());
+    }
+
+
+    @Test
+    public void testDeleteStreamHappyPath() throws Exception
+    {
+        final AtomicInteger invocationCount = new AtomicInteger(0);
+
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public DeleteStreamResult deleteStream(DeleteStreamRequest request)
+            {
+                invocationCount.getAndIncrement();
+                assertEquals("stream name passed in request", "example", request.getStreamName());
+                return new DeleteStreamResult();
+            }
+        }.getInstance();
+
+        boolean status = KinesisUtils.deleteStream(client, "example", 500L);
+
+        assertTrue("returned status indicates success",         status);
+        assertEquals("invocations of deleteStream",             1, invocationCount.get());
+    }
+
+
+    @Test
+    public void testDeleteStreamThrottling() throws Exception
+    {
+        final AtomicInteger invocationCount = new AtomicInteger(0);
+
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public DeleteStreamResult deleteStream(DeleteStreamRequest request)
+            {
+                invocationCount.getAndIncrement();
+                throw new LimitExceededException("");
+            }
+        }.getInstance();
+
+        // expected calls:
+        //  - throttled, sleep for 100 ms
+        //  - throttled, sleep for 200 ms
+
+        long start = System.currentTimeMillis();
+        boolean status = KinesisUtils.deleteStream(client, "example", 250L);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertFalse("returned status indicates failure",        status);
+        assertApproximate("elapsed time",                       300, elapsed, 10);
+        assertEquals("invocations of deleteStream",             2, invocationCount.get());
+    }
+
+
+    @Test
+    public void testDeleteStreamDoesntExist() throws Exception
+    {
+        final AtomicInteger invocationCount = new AtomicInteger(0);
+
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public DeleteStreamResult deleteStream(DeleteStreamRequest request)
+            {
+                invocationCount.getAndIncrement();
+                throw new ResourceNotFoundException("");
+            }
+        }.getInstance();
+
+        boolean status = KinesisUtils.deleteStream(client, "example", 250L);
+
+        assertFalse("returned status indicates failure",        status);
+        assertEquals("invocations of deleteStream",             1, invocationCount.get());
     }
 }
