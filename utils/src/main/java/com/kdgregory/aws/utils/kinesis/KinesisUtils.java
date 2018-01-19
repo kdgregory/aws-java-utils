@@ -195,14 +195,38 @@ public class KinesisUtils
 
 
     /**
-     *  Deletes a stream.
+     *  Deletes a stream, retrying if throttled. Does not wait for the stream to go
+     *  away; call {@link #waitForStatus} to do that.
      *
      *  @param  client      The AWS client used to make requests.
      *  @param  streamName  The name of the stream.
+     *
+     *  @return true if the <code>deleteStream</code> request completed successfully,
+     *          <code>false</code> if it failed for any reason (timed out or the stream
+     *          did not exist).
      */
-    public static void deleteStream(AmazonKinesis client, String streamName)
+    public static boolean deleteStream(AmazonKinesis client, String streamName, long timeout)
     {
-        throw new UnsupportedOperationException("FIXME - implement");
+        long timeoutAt = System.currentTimeMillis() + timeout;
+        long currentSleep = 100;
+        while (System.currentTimeMillis() < timeoutAt)
+        {
+            try
+            {
+                client.deleteStream(new DeleteStreamRequest().withStreamName(streamName));
+                return true;
+            }
+            catch (LimitExceededException ex)
+            {
+                CommonUtils.sleepQuietly(currentSleep);
+                currentSleep *= 2;
+            }
+            catch (ResourceNotFoundException ex)
+            {
+                return false;
+            }
+        }
+        return false;
     }
 
 
