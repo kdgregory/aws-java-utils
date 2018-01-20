@@ -182,19 +182,6 @@ public class KinesisUtils
 
 
     /**
-     *  Updates a stream's retention period and waits for it to become available again.
-     *
-     *  @param  client      The AWS client used to make requests.
-     *  @param  streamName  The name of the stream.
-     *  @param  retention   The retention period (hours)
-     */
-    public static void updateRetentionPeriod(AmazonKinesis client, String streamName, int retention)
-    {
-        throw new UnsupportedOperationException("FIXME - implement");
-    }
-
-
-    /**
      *  Deletes a stream, retrying if throttled. Does not wait for the stream to go
      *  away; call {@link #waitForStatus} to do that.
      *
@@ -231,6 +218,19 @@ public class KinesisUtils
 
 
     /**
+     *  Updates a stream's retention period and waits for it to become available again.
+     *
+     *  @param  client      The AWS client used to make requests.
+     *  @param  streamName  The name of the stream.
+     *  @param  retention   The retention period (hours)
+     */
+    public static void updateRetentionPeriod(AmazonKinesis client, String streamName, int retention)
+    {
+        throw new UnsupportedOperationException("FIXME - implement");
+    }
+
+
+    /**
      *  Retrieves shard iterators for the specified stream. The goal of this
      *  function is to allow uninterrupted reading of a stream based on saved
      *  offsets, so the following rules are applied to the results:
@@ -244,11 +244,12 @@ public class KinesisUtils
      *       the supplied map.
      *  <li> For any closed shard that is in the map, where the last sequence
      *       number in the shard is equal to the number in the map, this function
-     *       will return a <code>TRIM_HORIZON</code> iterator (so reading will
-     *       start with the first untrimmed record in the stream).
-     *  <li> For any shard in the stream that is not represented in the map, this
-     *       function will return a <code>TRIM_HORIZON</code> iterator (so will
-     *       identify new shards).
+     *       will return a <code>TRIM_HORIZON</code> iterator for each of the
+     *       shard's children.
+     *  <li> For any open shard in the stream does not have a parent in the map,
+     *       this function will return a <code>TRIM_HORIZON</code> iterator (so
+     *       will identify new shards even if the parents are no longer present,
+     *       or if the map is empty).
      *  </ul>
      *  To start reading a stream from its beginning, supply an empty map.
      *
