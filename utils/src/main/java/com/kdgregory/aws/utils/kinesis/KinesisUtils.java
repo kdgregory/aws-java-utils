@@ -187,6 +187,8 @@ public class KinesisUtils
      *
      *  @param  client      The AWS client used to make requests.
      *  @param  streamName  The name of the stream.
+     *  @param  timeout     The maximum amount of time (millis) that we'll spend trying to
+     *                      delete the stream.
      *
      *  @return true if the <code>deleteStream</code> request completed successfully,
      *          <code>false</code> if it failed for any reason (timed out or the stream
@@ -218,15 +220,54 @@ public class KinesisUtils
 
 
     /**
-     *  Updates a stream's retention period and waits for it to become available again.
+     *  Updates a stream's retention period and waits for it to become available again. This
+     *  function looks at the current retention period and chooses either the "increase" or
+     *  "decrease" operation. Calling with the same retention period is a no-op (other than
+     *  calls to retrieve the stream status).
      *
      *  @param  client      The AWS client used to make requests.
      *  @param  streamName  The name of the stream.
-     *  @param  retention   The retention period (hours)
+     *  @param  retention   The new retention period (hours)
+     *  @param  timeout     The maximum amount of time (millis) that we'll spend trying to
+     *                      update the stream or wait for it to become available.
+     *
+     *  @return The stream status. After successful update this will be ACTIVE. It will be
+     *          <code>UPDATING</code> if the update operation completed but the stream was
+     *          still updating when the timeout expired. If the update call timed out or
+     *          the stream does not exist, will return <code>null</code>.
      */
-    public static void updateRetentionPeriod(AmazonKinesis client, String streamName, int retention)
+    public static StreamStatus updateRetentionPeriod(AmazonKinesis client, String streamName, int retention, long timeout)
     {
-        throw new UnsupportedOperationException("FIXME - implement");
+        StreamDescription initialDescription = null;
+        while ((initialDescription == null) || (! StreamStatus.ACTIVE.name().equals(initialDescription.getStreamStatus())))
+        {
+            DescribeStreamRequest request = new DescribeStreamRequest().withStreamName(streamName);
+            initialDescription = describeStream(client, request, timeout);
+        }
+
+        int initialRetention = initialDescription.getRetentionPeriodHours().intValue();
+        if (initialRetention == retention)
+        {
+            return StreamStatus.ACTIVE;
+        }
+
+        // TODO: wrap this in a loop
+        if (initialRetention > retention)
+        {
+            DecreaseStreamRetentionPeriodRequest request = new DecreaseStreamRetentionPeriodRequest()
+                                                           .withStreamName(streamName)
+                                                           .withRetentionPeriodHours(retention);
+            client.decreaseStreamRetentionPeriod(request);
+        }
+        else
+        {
+            IncreaseStreamRetentionPeriodRequest request = new IncreaseStreamRetentionPeriodRequest()
+                                                           .withStreamName(streamName)
+                                                           .withRetentionPeriodHours(retention);
+            client.increaseStreamRetentionPeriod(request);
+        }
+
+        return waitForStatus(client, streamName, StreamStatus.ACTIVE, timeout);
     }
 
 
