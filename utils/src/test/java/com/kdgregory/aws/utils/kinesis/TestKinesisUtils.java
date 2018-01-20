@@ -474,4 +474,134 @@ public class TestKinesisUtils
         assertFalse("returned status indicates failure",        status);
         assertEquals("invocations of deleteStream",             1, invocationCount.get());
     }
+
+
+    @Test
+    public void testUpdateRetentionPeriodHappyPathIncrease() throws Exception
+    {
+        final AtomicInteger describeInvocationCount = new AtomicInteger(0);
+        final AtomicInteger increaseInvocationCount = new AtomicInteger(0);
+        final AtomicInteger decreaseInvocationCount = new AtomicInteger(0);
+
+        final AtomicInteger currentRetentionPeriod = new AtomicInteger(24);
+
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public DescribeStreamResult describeStream(DescribeStreamRequest request)
+            {
+                int invocationCount = describeInvocationCount.getAndIncrement();
+                assertEquals("stream name passed to describeStream", "example", request.getStreamName());
+
+                StreamStatus status = (invocationCount == 1)  // first call after update
+                                    ? StreamStatus.UPDATING
+                                    : StreamStatus.ACTIVE;
+                return new DescribeStreamResult()
+                           .withStreamDescription(new StreamDescription()
+                               .withStreamStatus(status)
+                               .withRetentionPeriodHours(currentRetentionPeriod.get()));
+            }
+
+            @SuppressWarnings("unused")
+            public IncreaseStreamRetentionPeriodResult increaseStreamRetentionPeriod(IncreaseStreamRetentionPeriodRequest request)
+            {
+                increaseInvocationCount.getAndIncrement();
+                assertEquals("stream name passed to increaseStreamRetentionPeriod", "example", request.getStreamName());
+                currentRetentionPeriod.set(request.getRetentionPeriodHours());
+                return new IncreaseStreamRetentionPeriodResult();
+            }
+
+            @SuppressWarnings("unused")
+            public DecreaseStreamRetentionPeriodResult decreaseStreamRetentionPeriod(DecreaseStreamRetentionPeriodRequest request)
+            {
+                // this should not be called
+                decreaseInvocationCount.getAndIncrement();
+                assertEquals("stream name passed to decreaseStreamRetentionPeriod", "example", request.getStreamName());
+                currentRetentionPeriod.set(request.getRetentionPeriodHours());
+                return new DecreaseStreamRetentionPeriodResult();
+            }
+        }.getInstance();
+
+        // the expected sequence of calls:
+        //  - initial describe
+        //  - increase retention
+        //  - updating, sleep for 100 ms
+        //  - active
+
+        long start = System.currentTimeMillis();
+        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, "example", 36, 1000L);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
+        assertEquals("current retention period",                        36, currentRetentionPeriod.get());
+        assertEquals("invocations of describeStream",                   3, describeInvocationCount.get());
+        assertEquals("invocations of increaseStreamRetentionPeriod",    1, increaseInvocationCount.get());
+        assertEquals("invocations of decreaseStreamRetentionPeriod",    0, decreaseInvocationCount.get());
+        assertApproximate("elapsed time",                               100, elapsed, 10);
+    }
+
+
+    @Test
+    public void testUpdateRetentionPeriodHappyPathDecrease() throws Exception
+    {
+        final AtomicInteger describeInvocationCount = new AtomicInteger(0);
+        final AtomicInteger increaseInvocationCount = new AtomicInteger(0);
+        final AtomicInteger decreaseInvocationCount = new AtomicInteger(0);
+
+        final AtomicInteger currentRetentionPeriod = new AtomicInteger(48);
+
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public DescribeStreamResult describeStream(DescribeStreamRequest request)
+            {
+                int invocationCount = describeInvocationCount.getAndIncrement();
+                assertEquals("stream name passed to describeStream", "example", request.getStreamName());
+
+                StreamStatus status = (invocationCount == 1)  // first call after update
+                                    ? StreamStatus.UPDATING
+                                    : StreamStatus.ACTIVE;
+                return new DescribeStreamResult()
+                           .withStreamDescription(new StreamDescription()
+                               .withStreamStatus(status)
+                               .withRetentionPeriodHours(currentRetentionPeriod.get()));
+            }
+
+            @SuppressWarnings("unused")
+            public IncreaseStreamRetentionPeriodResult increaseStreamRetentionPeriod(IncreaseStreamRetentionPeriodRequest request)
+            {
+                // this should not be called
+                increaseInvocationCount.getAndIncrement();
+                assertEquals("stream name passed to increaseStreamRetentionPeriod", "example", request.getStreamName());
+                currentRetentionPeriod.set(request.getRetentionPeriodHours());
+                return new IncreaseStreamRetentionPeriodResult();
+            }
+
+            @SuppressWarnings("unused")
+            public DecreaseStreamRetentionPeriodResult decreaseStreamRetentionPeriod(DecreaseStreamRetentionPeriodRequest request)
+            {
+                decreaseInvocationCount.getAndIncrement();
+                assertEquals("stream name passed to decreaseStreamRetentionPeriod", "example", request.getStreamName());
+                currentRetentionPeriod.set(request.getRetentionPeriodHours());
+                return new DecreaseStreamRetentionPeriodResult();
+            }
+        }.getInstance();
+
+        // the expected sequence of calls:
+        //  - initial describe
+        //  - decrease retention
+        //  - updating, sleep for 100 ms
+        //  - active
+
+        long start = System.currentTimeMillis();
+        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, "example", 36, 1000L);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
+        assertEquals("current retention period",                        36, currentRetentionPeriod.get());
+        assertEquals("invocations of describeStream",                   3, describeInvocationCount.get());
+        assertEquals("invocations of increaseStreamRetentionPeriod",    0, increaseInvocationCount.get());
+        assertEquals("invocations of decreaseStreamRetentionPeriod",    1, decreaseInvocationCount.get());
+        assertApproximate("elapsed time",                               100, elapsed, 10);
+    }
 }
