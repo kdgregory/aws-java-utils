@@ -144,7 +144,7 @@ public class TestKinesisUtils
 
         protected void increaseStreamRetentionPeriodInternal(IncreaseStreamRetentionPeriodRequest request)
         {
-            currentRetentionPeriod.set(request.getRetentionPeriodHours());
+            currentRetentionPeriod.set(request.getRetentionPeriodHours().intValue());
         }
 
         @SuppressWarnings("unused")
@@ -159,7 +159,7 @@ public class TestKinesisUtils
 
         protected void decreaseStreamRetentionPeriodInternal(DecreaseStreamRetentionPeriodRequest request)
         {
-            currentRetentionPeriod.set(request.getRetentionPeriodHours());
+            currentRetentionPeriod.set(request.getRetentionPeriodHours().intValue());
         }
     }
 
@@ -540,8 +540,52 @@ public class TestKinesisUtils
 
 
     @Test
+    public void testUpdateRetentionPeriodIncreaseThrottling() throws Exception
+    {
+        // note: the Java SDK doesn't indicate that LimitExceededException is possible but the
+        //       API docs do so we need to handle (and test for) it
+
+        RetentionPeriodMock mock = new RetentionPeriodMock("example", 24, 36, StreamStatus.ACTIVE)
+        {
+            @Override
+            protected void increaseStreamRetentionPeriodInternal(IncreaseStreamRetentionPeriodRequest request)
+            {
+                // invocation count has already been incremented, so we throw twice not three times
+                if (increaseInvocationCount.get() < 3)
+                {
+                    throw new LimitExceededException("");
+                }
+                super.increaseStreamRetentionPeriodInternal(request);
+            }
+        };
+
+        AmazonKinesis client = mock.getInstance();
+
+        // the expected sequence of calls:
+        //  - initial describe
+        //  - try to increase retention, throttled, sleep 100ms
+        //  - try to increase retention, throttled, sleep 200ms
+        //  - try to increase retention, success
+        //  - active
+
+        long start = System.currentTimeMillis();
+        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, "example", 36, 1000L);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
+        assertEquals("current retention period",                        36, mock.currentRetentionPeriod.get());
+        assertEquals("invocations of describeStream",                   2,  mock.describeInvocationCount.get());
+        assertEquals("invocations of increaseStreamRetentionPeriod",    3,  mock.increaseInvocationCount.get());
+        assertApproximate("elapsed time",                               300, elapsed, 10);
+    }
+
+
+    @Test
     public void testUpdateRetentionPeriodDecreaseHappyPath() throws Exception
     {
+        // sad path testing is handled by the various Increase tests; this just verifies
+        // that we pick the correct call based on comparison of current and new period
+
         RetentionPeriodMock mock = new RetentionPeriodMock("example", 48, 36, StreamStatus.ACTIVE, StreamStatus.UPDATING, StreamStatus.ACTIVE)
         {
             @Override

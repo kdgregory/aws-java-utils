@@ -32,6 +32,27 @@ import com.kdgregory.aws.utils.CommonUtils;
 public class KinesisUtils
 {
     /**
+     *  Extracts the status from a stream description and converts it from a string
+     *  to a <code>StreamStatus</code> value. Returns null if the description is null
+     *  or the status is unconvertable (which should never happen in the real world).
+     */
+    public static StreamStatus getStatus(StreamDescription description)
+    {
+        if (description == null) return null;
+
+        try
+        {
+            return StreamStatus.valueOf(description.getStreamStatus());
+        }
+        catch (IllegalArgumentException ex)
+        {
+            // this should never happen with an AWS-constructed description but let's be sure
+            return null;
+        }
+    }
+
+
+    /**
      *  Executes a <code>DescribeStream</code> request, returning the stream
      *  description from the response. Will return null if the stream does not
      *  exist, cannot be read within the specified timeout, or if the thread
@@ -122,10 +143,8 @@ public class KinesisUtils
 
         while ((remainingTimeout = timeoutAt - System.currentTimeMillis()) > 0)
         {
-            StreamDescription desc = describeStream(client, request, remainingTimeout);
-            lastStatus = (desc != null)
-                       ? StreamStatus.valueOf(desc.getStreamStatus())
-                       : null;
+            StreamDescription description = describeStream(client, request, remainingTimeout);
+            lastStatus = getStatus(description);
             if (lastStatus == desiredStatus) break;
 
             // sleep to avoid throttling
@@ -235,14 +254,20 @@ public class KinesisUtils
      *          <code>UPDATING</code> if the update operation completed but the stream was
      *          still updating when the timeout expired. If the update call timed out or
      *          the stream does not exist, will return <code>null</code>.
+     *
+     *  @throws IllegalArgumentException if thrown by underlying call. The AWS docs don't
+     *          give specific reasons for this exception, but one cause is specifying a
+     *          retention period outside the allowed 24..168 hours.
      */
     public static StreamStatus updateRetentionPeriod(AmazonKinesis client, String streamName, int retention, long timeout)
     {
+        long timeoutAt = System.currentTimeMillis() + timeout;
+
         StreamDescription initialDescription = null;
-        while ((initialDescription == null) || (! StreamStatus.ACTIVE.name().equals(initialDescription.getStreamStatus())))
+        while (getStatus(initialDescription) != StreamStatus.ACTIVE)
         {
             DescribeStreamRequest request = new DescribeStreamRequest().withStreamName(streamName);
-            initialDescription = describeStream(client, request, timeout);
+            initialDescription = describeStream(client, request, (timeoutAt - System.currentTimeMillis()));
         }
 
         int initialRetention = initialDescription.getRetentionPeriodHours().intValue();
@@ -251,23 +276,36 @@ public class KinesisUtils
             return StreamStatus.ACTIVE;
         }
 
-        // TODO: wrap this in a loop
-        if (initialRetention > retention)
+        long currentSleep = 100;
+        while (System.currentTimeMillis() < timeoutAt)
         {
-            DecreaseStreamRetentionPeriodRequest request = new DecreaseStreamRetentionPeriodRequest()
-                                                           .withStreamName(streamName)
-                                                           .withRetentionPeriodHours(retention);
-            client.decreaseStreamRetentionPeriod(request);
-        }
-        else
-        {
-            IncreaseStreamRetentionPeriodRequest request = new IncreaseStreamRetentionPeriodRequest()
-                                                           .withStreamName(streamName)
-                                                           .withRetentionPeriodHours(retention);
-            client.increaseStreamRetentionPeriod(request);
+            try
+            {
+                if (initialRetention > retention)
+                {
+                    DecreaseStreamRetentionPeriodRequest request = new DecreaseStreamRetentionPeriodRequest()
+                                                                   .withStreamName(streamName)
+                                                                   .withRetentionPeriodHours(retention);
+                    client.decreaseStreamRetentionPeriod(request);
+                    break;
+                }
+                else
+                {
+                    IncreaseStreamRetentionPeriodRequest request = new IncreaseStreamRetentionPeriodRequest()
+                                                                   .withStreamName(streamName)
+                                                                   .withRetentionPeriodHours(retention);
+                    client.increaseStreamRetentionPeriod(request);
+                    break;
+                }
+            }
+            catch (LimitExceededException ex)
+            {
+                CommonUtils.sleepQuietly(currentSleep);
+                currentSleep *= 2;
+            }
         }
 
-        return waitForStatus(client, streamName, StreamStatus.ACTIVE, timeout);
+        return waitForStatus(client, streamName, StreamStatus.ACTIVE, (timeoutAt - System.currentTimeMillis()));
     }
 
 
