@@ -11,6 +11,7 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 import net.sf.kdgcommons.test.SelfMock;
+import static net.sf.kdgcommons.test.NumericAsserts.*;
 import static net.sf.kdgcommons.test.StringAsserts.*;
 
 import com.amazonaws.services.kinesis.AmazonKinesis;
@@ -131,5 +132,103 @@ public class TestKinesisUtilsRetreiveShardIterators
         assertNotEmpty("returned iterator for shard 2",     iterators.get(SHARD002));
         assertEquals("invocation count, describeStream",    1, mock.describeInvocationCount.get());
         assertEquals("invocation count, getShardIterator",  2, mock.retrieveInvocationCount.get());
+    }
+
+
+    @Test
+    public void testThrottling() throws Exception
+    {
+        // expected call sequence:
+        // - describe
+        // - retrieve, throttled, wait 100ms
+        // - retrieve, successful
+        // - retrieve, throttled, wait 100ms
+        // - retrieve, successful
+
+        KinesisClientMock mock = new KinesisClientMock("example", shard001, shard002)
+        {
+            @Override
+            protected String getShardIterator0(GetShardIteratorRequest request)
+            {
+                // note: invocation count is pre-incremented, so this will be 1st and 3rd calls
+                if ((retrieveInvocationCount.get() % 2) == 1)
+                    throw new ProvisionedThroughputExceededException("");
+                else
+                    return super.getShardIterator0(request);
+            }
+        };
+        AmazonKinesis client = mock.getInstance();
+
+        long start = System.currentTimeMillis();
+        Map<String,String> iterators = KinesisUtils.retrieveShardIterators(client, "example", null, ShardIteratorType.TRIM_HORIZON, 1000L);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertEquals("size of returned map",                2, iterators.size());
+        assertNotEmpty("returned iterator for shard",       iterators.get(SHARD001));
+        assertNotEmpty("returned iterator for shard",       iterators.get(SHARD002));
+        assertEquals("invocation count, describeStream",    1, mock.describeInvocationCount.get());
+        assertEquals("invocation count, getShardIterator",  4, mock.retrieveInvocationCount.get());
+        assertApproximate("total execution time",           200, elapsed, 10);
+    }
+
+
+    @Test
+    public void testTimeoutInDescribe() throws Exception
+    {
+        // expected call sequence:
+        // - describe, throttled, sleep 100ms
+        // - describe, throttled, sleep 200ms
+
+        KinesisClientMock mock = new KinesisClientMock("example", shard001, shard002)
+        {
+            @Override
+            public DescribeStreamResult describeStream(DescribeStreamRequest request)
+            {
+                throw new LimitExceededException("");
+            }
+
+            @Override
+            public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
+            {
+                fail("should never get to this point");
+                return null;
+            }
+
+        };
+        AmazonKinesis client = mock.getInstance();
+
+        long start = System.currentTimeMillis();
+        Map<String,String> iterators = KinesisUtils.retrieveShardIterators(client, "example", null, ShardIteratorType.TRIM_HORIZON, 250L);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertNull("did not return a result",               iterators);
+        assertApproximate("total execution time",           300, elapsed, 10);
+    }
+
+
+    @Test
+    public void testTimeoutWhenRetrievingIterators() throws Exception
+    {
+        // expected call sequence:
+        // - describe
+        // - retrieve, throttled, wait 100ms
+        // - retrieve, throttled, wait 200ms
+
+        KinesisClientMock mock = new KinesisClientMock("example", shard001, shard002)
+        {
+            @Override
+            protected String getShardIterator0(GetShardIteratorRequest request)
+            {
+                throw new ProvisionedThroughputExceededException("");
+            }
+        };
+        AmazonKinesis client = mock.getInstance();
+
+        long start = System.currentTimeMillis();
+        Map<String,String> iterators = KinesisUtils.retrieveShardIterators(client, "example", null, ShardIteratorType.TRIM_HORIZON, 250L);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertNull("did not return a result",               iterators);
+        assertApproximate("total execution time",           300, elapsed, 10);
     }
 }
