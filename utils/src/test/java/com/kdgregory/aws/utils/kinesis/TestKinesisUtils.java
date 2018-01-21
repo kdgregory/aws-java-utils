@@ -510,7 +510,14 @@ public class TestKinesisUtils
     @Test
     public void testUpdateRetentionPeriodIncreaseHappyPath() throws Exception
     {
-        RetentionPeriodMock mock = new RetentionPeriodMock("example", 24, 36, StreamStatus.ACTIVE, StreamStatus.UPDATING, StreamStatus.ACTIVE)
+        // the expected sequence of calls:
+        //  - wait for status
+        //  - get descritpion
+        //  - increase retention
+        //  - updating, sleep for 100 ms
+        //  - active
+
+        RetentionPeriodMock mock = new RetentionPeriodMock("example", 24, 36, StreamStatus.ACTIVE, StreamStatus.ACTIVE, StreamStatus.UPDATING, StreamStatus.ACTIVE)
         {
             @Override
             protected void decreaseStreamRetentionPeriodInternal(DecreaseStreamRetentionPeriodRequest request)
@@ -521,20 +528,15 @@ public class TestKinesisUtils
 
         AmazonKinesis client = mock.getInstance();
 
-        // the expected sequence of calls:
-        //  - initial describe
-        //  - increase retention
-        //  - updating, sleep for 100 ms
-        //  - active
-
         long start = System.currentTimeMillis();
         StreamStatus status = KinesisUtils.updateRetentionPeriod(client, "example", 36, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
         assertEquals("current retention period",                        36, mock.currentRetentionPeriod.get());
-        assertEquals("invocations of describeStream",                   3,  mock.describeInvocationCount.get());
+        assertEquals("invocations of describeStream",                   4,  mock.describeInvocationCount.get());
         assertEquals("invocations of increaseStreamRetentionPeriod",    1,  mock.increaseInvocationCount.get());
+        assertEquals("invocations of decreaseStreamRetentionPeriod",    0,  mock.decreaseInvocationCount.get());
         assertApproximate("elapsed time",                               100, elapsed, 10);
     }
 
@@ -544,6 +546,18 @@ public class TestKinesisUtils
     {
         // note: the Java SDK doesn't indicate that LimitExceededException is possible but the
         //       API docs do so we need to handle (and test for) it
+
+        // the expected sequence of calls:
+        //  - wait for status
+        //  - initial describe
+        //  - try to increase retention, throttled, sleep 100ms
+        //  - wait for status
+        //  - initial describe
+        //  - try to increase retention, throttled, sleep 200ms
+        //  - wait for status
+        //  - initial describe
+        //  - try to increase retention, success
+        //  - active
 
         RetentionPeriodMock mock = new RetentionPeriodMock("example", 24, 36, StreamStatus.ACTIVE)
         {
@@ -560,13 +574,55 @@ public class TestKinesisUtils
         };
 
         AmazonKinesis client = mock.getInstance();
+        long start = System.currentTimeMillis();
+        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, "example", 36, 1000L);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
+        assertEquals("current retention period",                        36, mock.currentRetentionPeriod.get());
+        assertEquals("invocations of describeStream",                   7,  mock.describeInvocationCount.get());
+        assertEquals("invocations of increaseStreamRetentionPeriod",    3,  mock.increaseInvocationCount.get());
+        assertApproximate("elapsed time",                               300, elapsed, 10);
+    }
+
+
+    @Test
+    public void testUpdateRetentionPeriodIncreaseConcurrentUpdate() throws Exception
+    {
+        // we're going to try to increase the retention period but get blocked by a concurrent
+        // call that increases it more than we planned, so we'll end up decreasing .. this is
+        // an extremely convoluted example that's unlikely in real life, but verifies that the
+        // logic is sound
 
         // the expected sequence of calls:
+        //  - wait for status
         //  - initial describe
-        //  - try to increase retention, throttled, sleep 100ms
-        //  - try to increase retention, throttled, sleep 200ms
-        //  - try to increase retention, success
-        //  - active
+        //  - try to increase retention, throws ResourceInUseException, sleep for 100 ms
+        //  - wait for status
+        //  - initial describe
+        //  - try to decrease retention, success
+        //  - wait for status
+
+        RetentionPeriodMock mock = new RetentionPeriodMock("example", 24, 36, StreamStatus.ACTIVE)
+        {
+            @Override
+            protected void increaseStreamRetentionPeriodInternal(IncreaseStreamRetentionPeriodRequest request)
+            {
+                // invocation count has already been incremented, so this happens on first call
+                if (increaseInvocationCount.get() == 1)
+                {
+                    currentRetentionPeriod.set(48);
+                    throw new ResourceInUseException("");
+                }
+                else
+                {
+                    // on the next call we should be trying to decrease the retention period
+                    throw new IllegalStateException("shouldn't call increase twice");
+                }
+            }
+        };
+
+        AmazonKinesis client = mock.getInstance();
 
         long start = System.currentTimeMillis();
         StreamStatus status = KinesisUtils.updateRetentionPeriod(client, "example", 36, 1000L);
@@ -574,9 +630,43 @@ public class TestKinesisUtils
 
         assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
         assertEquals("current retention period",                        36, mock.currentRetentionPeriod.get());
+        assertEquals("invocations of describeStream",                   5,  mock.describeInvocationCount.get());
+        assertEquals("invocations of increaseStreamRetentionPeriod",    1,  mock.increaseInvocationCount.get());
+        assertEquals("invocations of decreaseStreamRetentionPeriod",    1,  mock.decreaseInvocationCount.get());
+        assertApproximate("elapsed time",                               100, elapsed, 10);
+    }
+
+
+    @Test
+    public void testUpdateRetentionPeriodIncreaseStreamDisappears() throws Exception
+    {
+        // this is even more unlikely than the previous test: the stream disappears
+        // between an "ACTIVE" status and the increase/decrease call ... in fact, I
+        // don't think it would ever happen, but as it's a documented exception I
+        // need to support it
+
+        // the expected sequence of calls:
+        //  - wait for status
+        //  - initial describe
+        //  - try to increase retention, throws ResourceNotFoundException, stop trying
+
+        RetentionPeriodMock mock = new RetentionPeriodMock("example", 24, 36, StreamStatus.ACTIVE)
+        {
+            @Override
+            protected void increaseStreamRetentionPeriodInternal(IncreaseStreamRetentionPeriodRequest request)
+            {
+                throw new ResourceNotFoundException("");
+            }
+        };
+
+        AmazonKinesis client = mock.getInstance();
+
+        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, "example", 36, 1000L);
+
+        assertEquals("final stream status",                             null, status);
         assertEquals("invocations of describeStream",                   2,  mock.describeInvocationCount.get());
-        assertEquals("invocations of increaseStreamRetentionPeriod",    3,  mock.increaseInvocationCount.get());
-        assertApproximate("elapsed time",                               300, elapsed, 10);
+        assertEquals("invocations of increaseStreamRetentionPeriod",    1,  mock.increaseInvocationCount.get());
+        assertEquals("invocations of decreaseStreamRetentionPeriod",    0,  mock.decreaseInvocationCount.get());
     }
 
 
@@ -586,7 +676,14 @@ public class TestKinesisUtils
         // sad path testing is handled by the various Increase tests; this just verifies
         // that we pick the correct call based on comparison of current and new period
 
-        RetentionPeriodMock mock = new RetentionPeriodMock("example", 48, 36, StreamStatus.ACTIVE, StreamStatus.UPDATING, StreamStatus.ACTIVE)
+        // the expected sequence of calls:
+        //  - wait for status
+        //  - get descritpion
+        //  - increase retention
+        //  - updating, sleep for 100 ms
+        //  - active
+
+        RetentionPeriodMock mock = new RetentionPeriodMock("example", 48, 36, StreamStatus.ACTIVE, StreamStatus.ACTIVE, StreamStatus.UPDATING, StreamStatus.ACTIVE)
         {
             @Override
             protected void increaseStreamRetentionPeriodInternal(IncreaseStreamRetentionPeriodRequest request)
@@ -597,19 +694,14 @@ public class TestKinesisUtils
 
         AmazonKinesis client = mock.getInstance();
 
-        // the expected sequence of calls:
-        //  - initial describe
-        //  - decrease retention
-        //  - updating, sleep for 100 ms
-        //  - active
-
         long start = System.currentTimeMillis();
         StreamStatus status = KinesisUtils.updateRetentionPeriod(client, "example", 36, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
         assertEquals("current retention period",                        36, mock.currentRetentionPeriod.get());
-        assertEquals("invocations of describeStream",                   3,  mock.describeInvocationCount.get());
+        assertEquals("invocations of describeStream",                   4,  mock.describeInvocationCount.get());
+        assertEquals("invocations of increaseStreamRetentionPeriod",    0,  mock.increaseInvocationCount.get());
         assertEquals("invocations of decreaseStreamRetentionPeriod",    1,  mock.decreaseInvocationCount.get());
         assertApproximate("elapsed time",                               100, elapsed, 10);
     }
