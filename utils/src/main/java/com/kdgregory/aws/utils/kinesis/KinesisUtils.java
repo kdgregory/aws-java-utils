@@ -263,25 +263,45 @@ public class KinesisUtils
     {
         long timeoutAt = System.currentTimeMillis() + timeout;
 
-        StreamDescription initialDescription = null;
-        while (getStatus(initialDescription) != StreamStatus.ACTIVE)
-        {
-            DescribeStreamRequest request = new DescribeStreamRequest().withStreamName(streamName);
-            initialDescription = describeStream(client, request, (timeoutAt - System.currentTimeMillis()));
-        }
+        // this is certainly not the most efficient way to do things, but the code is simple
+        // and nobody is going to be calling this method in a tight loop
 
-        int initialRetention = initialDescription.getRetentionPeriodHours().intValue();
-        if (initialRetention == retention)
-        {
-            return StreamStatus.ACTIVE;
-        }
-
-        long currentSleep = 100;
+        int currentSleep = 100;
         while (System.currentTimeMillis() < timeoutAt)
         {
+            StreamStatus initialStatus = waitForStatus(client, streamName, StreamStatus.ACTIVE, timeout);
+            if (initialStatus == null)
+            {
+                // probable timeout while waiting for stream to become active
+                return null;
+            }
+
+            // there is a chance that status changes between the last describe and this one
+            // but we'll simply let the update call fail rather than use an inner test
+
+            DescribeStreamRequest describeRequest = new DescribeStreamRequest().withStreamName(streamName);
+            StreamDescription description = describeStream(client, describeRequest, (timeoutAt - System.currentTimeMillis()));
+            if (description == null)
+            {
+                // stream has magically disappeared between two calls or we've timed out
+                return null;
+            }
+            if (getStatus(description) != StreamStatus.ACTIVE)
+            {
+                // race condition, someone else is changing stream so wait until they're done
+                continue;
+            }
+
+            int currentRetentition = description.getRetentionPeriodHours().intValue();
+            if (currentRetentition == retention)
+            {
+                // nothing to see here, move along
+                return StreamStatus.ACTIVE;
+            }
+
             try
             {
-                if (initialRetention > retention)
+                if (currentRetentition > retention)
                 {
                     DecreaseStreamRetentionPeriodRequest request = new DecreaseStreamRetentionPeriodRequest()
                                                                    .withStreamName(streamName)
@@ -300,9 +320,20 @@ public class KinesisUtils
             }
             catch (LimitExceededException ex)
             {
-                CommonUtils.sleepQuietly(currentSleep);
-                currentSleep *= 2;
+                // fall out to the end of the loop
             }
+            catch (ResourceInUseException ex)
+            {
+                // fall out to the end of the loop
+            }
+            catch (ResourceNotFoundException ex)
+            {
+                // stream doesn't exist so no point in trying to do anything more
+                return null;
+            }
+
+            CommonUtils.sleepQuietly(currentSleep);
+            currentSleep *= 2;
         }
 
         return waitForStatus(client, streamName, StreamStatus.ACTIVE, (timeoutAt - System.currentTimeMillis()));
