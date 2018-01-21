@@ -15,7 +15,6 @@
 package com.kdgregory.aws.utils.kinesis;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -383,19 +382,37 @@ public class KinesisUtils
         Map<String,String> seqnums, ShardIteratorType defaultType,
         long timeout)
     {
+        long timeoutAt = System.currentTimeMillis() + timeout;
         Map<String,String> result = new HashMap<String,String>();
-        if (seqnums == null) seqnums = Collections.emptyMap();
 
-        for (Shard shard : describeShards(client, streamName, timeout))
+        List<Shard> shards = describeShards(client, streamName, timeout);
+        if (shards == null) return null;
+
+        for (Shard shard : shards)
         {
-            GetShardIteratorRequest request = new GetShardIteratorRequest()
-                                              .withStreamName(streamName)
-                                              .withShardId(shard.getShardId())
-                                              .withShardIteratorType(defaultType);
-            GetShardIteratorResult response = client.getShardIterator(request);
-            result.put(shard.getShardId(), response.getShardIterator());
+            long currentSleepTime = 100;
+            while (System.currentTimeMillis() < timeoutAt)
+            {
+                try
+                {
+                    GetShardIteratorRequest request = new GetShardIteratorRequest()
+                                                      .withStreamName(streamName)
+                                                      .withShardId(shard.getShardId())
+                                                      .withShardIteratorType(defaultType);
+                    GetShardIteratorResult response = client.getShardIterator(request);
+                    result.put(shard.getShardId(), response.getShardIterator());
+                    break;
+                }
+                catch (ProvisionedThroughputExceededException ex)
+                {
+                    CommonUtils.sleepQuietly(currentSleepTime);
+                    currentSleepTime *= 2;
+                }
+            }
         }
 
-        return result;
+        return result.size() == shards.size()
+             ? result
+             : null;
     }
 }
