@@ -15,6 +15,8 @@
 package com.kdgregory.aws.utils.kinesis;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -356,23 +358,44 @@ public class KinesisUtils
      *       number in the shard is equal to the number in the map, this function
      *       will return a <code>TRIM_HORIZON</code> iterator for each of the
      *       shard's children.
-     *  <li> For any open shard in the stream does not have a parent in the map,
-     *       this function will return a <code>TRIM_HORIZON</code> iterator (so
-     *       will identify new shards even if the parents are no longer present,
-     *       or if the map is empty).
+     *  <li> For any open shard in the stream that is not in the map and does not
+     *       have a parent in the map, returns an iterator using the provided
+     *       default iterator type.
      *  </ul>
      *  To start reading a stream from its beginning, supply an empty map.
      *
      *  @param  client      The AWS client used to make requests.
      *  @param  streamName  The name of the stream.
      *  @param  seqnums     A map associating shard ID with the sequence number
-     *                      of the last record read from that shard.
+     *                      of the last record read from that shard. May be
+     *                      null, in which case default iterators are retrieved
+     *                      for all shards in the stream.
+     *  @param  defaultType Specifies the default iterator type to use when the
+     *                      shard is newly discovered.
+     *  @param  timeout     Maximum number of milliseconds to spend trying to
+     *                      retrieve iterators.
      *
-     *  @return A map associating shard ID with an iterator for that shard.
+     *  @return A map associating each shard ID with an iterator for that shard.
+     *          Will be null if the stream does not exist or the timeout expired.
      */
     public static Map<String,String> retrieveShardIterators(
-        AmazonKinesis client, String streamName, Map<String,String> seqnums)
+        AmazonKinesis client, String streamName,
+        Map<String,String> seqnums, ShardIteratorType defaultType,
+        long timeout)
     {
-        throw new UnsupportedOperationException("FIXME - implement");
+        Map<String,String> result = new HashMap<String,String>();
+        if (seqnums == null) seqnums = Collections.emptyMap();
+
+        for (Shard shard : describeShards(client, streamName, timeout))
+        {
+            GetShardIteratorRequest request = new GetShardIteratorRequest()
+                                              .withStreamName(streamName)
+                                              .withShardId(shard.getShardId())
+                                              .withShardIteratorType(defaultType);
+            GetShardIteratorResult response = client.getShardIterator(request);
+            result.put(shard.getShardId(), response.getShardIterator());
+        }
+
+        return result;
     }
 }
