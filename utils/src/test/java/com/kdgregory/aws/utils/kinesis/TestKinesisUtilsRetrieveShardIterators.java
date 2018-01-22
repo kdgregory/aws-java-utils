@@ -20,7 +20,7 @@ import com.amazonaws.services.kinesis.model.*;
 
 
 // there are enough combinations that we need to test that this deserves its own class
-public class TestKinesisUtilsRetreiveShardIterators
+public class TestKinesisUtilsRetrieveShardIterators
 {
 //----------------------------------------------------------------------------
 //  Some preconstructed sample shards -- all will have a name and starting
