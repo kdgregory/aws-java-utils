@@ -15,6 +15,7 @@
 package com.kdgregory.aws.utils.kinesis;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -384,10 +385,12 @@ public class KinesisUtils
     {
         long timeoutAt = System.currentTimeMillis() + timeout;
         Map<String,String> result = new HashMap<String,String>();
+        if (seqnums == null) seqnums = Collections.emptyMap();
 
         List<Shard> shards = describeShards(client, streamName, timeout);
         if (shards == null) return null;
 
+        int shardsProcessed = 0;
         for (Shard shard : shards)
         {
             long currentSleepTime = 100;
@@ -397,10 +400,13 @@ public class KinesisUtils
                 {
                     GetShardIteratorRequest request = new GetShardIteratorRequest()
                                                       .withStreamName(streamName)
-                                                      .withShardId(shard.getShardId())
-                                                      .withShardIteratorType(defaultType);
-                    GetShardIteratorResult response = client.getShardIterator(request);
-                    result.put(shard.getShardId(), response.getShardIterator());
+                                                      .withShardId(shard.getShardId());
+                    if (configureShardIteratorRequest(request, shard, seqnums.get(shard.getShardId()), defaultType))
+                    {
+                        GetShardIteratorResult response = client.getShardIterator(request);
+                        result.put(shard.getShardId(), response.getShardIterator());
+                    }
+                    shardsProcessed++;
                     break;
                 }
                 catch (ProvisionedThroughputExceededException ex)
@@ -411,8 +417,38 @@ public class KinesisUtils
             }
         }
 
-        return result.size() == shards.size()
+        return shardsProcessed == shards.size()
              ? result
              : null;
+    }
+
+
+//----------------------------------------------------------------------------
+//  Internals
+//----------------------------------------------------------------------------
+
+    /**
+     *  Called by retrieveShardIterators() to figure out how to configure the
+     *  request for the passed shard and stored offset. Returns false if there
+     *  was no valid configuration (which means we shouldn't make the request).
+     */
+    private static boolean configureShardIteratorRequest(
+        GetShardIteratorRequest request, Shard shard,
+        String savedOffset, ShardIteratorType defaultType)
+    {
+        if (savedOffset == null)
+        {
+            request.setShardIteratorType(defaultType);
+            return true;
+        }
+
+        if (savedOffset.equals(shard.getSequenceNumberRange().getEndingSequenceNumber()))
+        {
+            return false;
+        }
+
+        request.setShardIteratorType(ShardIteratorType.AFTER_SEQUENCE_NUMBER);
+        request.setStartingSequenceNumber(savedOffset);
+        return true;
     }
 }
