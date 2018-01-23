@@ -384,28 +384,40 @@ public class KinesisUtils
         long timeout)
     {
         long timeoutAt = System.currentTimeMillis() + timeout;
-        Map<String,String> result = new HashMap<String,String>();
+
+        // the user might not have supplied offsets but we still need to query the map
         if (seqnums == null) seqnums = Collections.emptyMap();
 
         List<Shard> shards = describeShards(client, streamName, timeout);
         if (shards == null) return null;
 
+        Map<String,ShardIteratorType> retrieveTypes = identifyShardsToRetrieve(shards, seqnums, defaultType);
+
+        Map<String,String> result = new HashMap<String,String>();
         int shardsProcessed = 0;
         for (Shard shard : shards)
         {
+            String shardId = shard.getShardId();
+            ShardIteratorType retrieveType = retrieveTypes.get(shard.getShardId());
+            if (retrieveType == null)
+                continue;
+
             long currentSleepTime = 100;
             while (System.currentTimeMillis() < timeoutAt)
             {
                 try
                 {
                     GetShardIteratorRequest request = new GetShardIteratorRequest()
-                                                      .withStreamName(streamName)
-                                                      .withShardId(shard.getShardId());
-                    if (configureShardIteratorRequest(request, shard, seqnums.get(shard.getShardId()), defaultType))
+                                  .withStreamName(streamName)
+                                  .withShardId(shardId)
+                                  .withShardIteratorType(retrieveType);
+                    if (retrieveType == ShardIteratorType.AFTER_SEQUENCE_NUMBER)
                     {
-                        GetShardIteratorResult response = client.getShardIterator(request);
-                        result.put(shard.getShardId(), response.getShardIterator());
+                        request.setStartingSequenceNumber(seqnums.get(shardId));
                     }
+
+                    GetShardIteratorResult response = client.getShardIterator(request);
+                    result.put(shardId, response.getShardIterator());
                     shardsProcessed++;
                     break;
                 }
@@ -417,7 +429,7 @@ public class KinesisUtils
             }
         }
 
-        return shardsProcessed == shards.size()
+        return shardsProcessed == retrieveTypes.size()
              ? result
              : null;
     }
@@ -428,27 +440,36 @@ public class KinesisUtils
 //----------------------------------------------------------------------------
 
     /**
-     *  Called by retrieveShardIterators() to figure out how to configure the
-     *  request for the passed shard and stored offset. Returns false if there
-     *  was no valid configuration (which means we shouldn't make the request).
+     *  This function is called by retrieveShardIterators() to figure out which
+     *  shards to retrieve and how to retrieve them. The returned map only holds
+     *  shards that we should retrieve, so that it can be used to verify that we
+     *  retrieved all shards that we should.
      */
-    private static boolean configureShardIteratorRequest(
-        GetShardIteratorRequest request, Shard shard,
-        String savedOffset, ShardIteratorType defaultType)
+    private static Map<String,ShardIteratorType> identifyShardsToRetrieve(
+        List<Shard> shards, Map<String,String> seqnums, ShardIteratorType defaultType)
     {
-        if (savedOffset == null)
+        // this map lets us follow parent-child relationships
+        Map<String,Shard> shardsById = new HashMap<String,Shard>();
+        for (Shard shard : shards)
         {
-            request.setShardIteratorType(defaultType);
-            return true;
+            shardsById.put(shard.getShardId(), shard);
         }
 
-        if (savedOffset.equals(shard.getSequenceNumberRange().getEndingSequenceNumber()))
+        Map<String,ShardIteratorType> result = new HashMap<String,ShardIteratorType>();
+        for (Shard shard : shards)
         {
-            return false;
-        }
+            String shardId = shard.getShardId();
+            String savedOffset = seqnums.get(shardId);
 
-        request.setShardIteratorType(ShardIteratorType.AFTER_SEQUENCE_NUMBER);
-        request.setStartingSequenceNumber(savedOffset);
-        return true;
+            if (savedOffset == null)
+            {
+                result.put(shardId, defaultType);
+            }
+            else if (! savedOffset.equals(shard.getSequenceNumberRange().getEndingSequenceNumber()))
+            {
+                result.put(shardId, ShardIteratorType.AFTER_SEQUENCE_NUMBER);
+            }
+        }
+        return result;
     }
 }

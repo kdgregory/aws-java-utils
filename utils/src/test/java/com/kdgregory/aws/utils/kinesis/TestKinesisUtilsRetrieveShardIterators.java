@@ -261,6 +261,150 @@ public class TestKinesisUtilsRetrieveShardIterators
 
 
     @Test
+    public void testPickParentIfNoOffsetsAndDefaultTrimHorizon() throws Exception
+    {
+        shard001.getSequenceNumberRange().setEndingSequenceNumber(SHARD001_END);
+        shard002.setParentShardId(SHARD001_NAME);
+
+        KinesisClientMock mock = new KinesisClientMock("example", shard001, shard002)
+        {
+            @Override
+            protected String getShardIterator0(GetShardIteratorRequest request)
+            {
+                if (request.getShardId().equals(SHARD001_NAME))
+                {
+                    assertEquals("shard 001 iterator type", ShardIteratorType.TRIM_HORIZON.toString(), request.getShardIteratorType());
+                }
+                if (request.getShardId().equals(SHARD002_NAME))
+                {
+                    fail("shard 002 should not have been queried");
+                }
+                return super.getShardIterator0(request);
+            }
+        };
+        AmazonKinesis client = mock.getInstance();
+
+        Map<String,String> iterators = KinesisUtils.retrieveShardIterators(client, "example", null, ShardIteratorType.TRIM_HORIZON, 1000L);
+
+        assertEquals("size of returned map",                1, iterators.size());
+        assertNotEmpty("returned iterator for shard 1",     iterators.get(SHARD001_NAME));
+        assertNull("did not return iterator for shard 2",   iterators.get(SHARD002_NAME));
+        assertEquals("invocation count, describeStream",    1, mock.describeInvocationCount.get());
+        assertEquals("invocation count, getShardIterator",  1, mock.retrieveInvocationCount.get());
+    }
+
+
+//    @Test
+//    public void testPickChildIfNoOffsetsAndDefaultLatest() throws Exception
+//    {
+//        shard001.getSequenceNumberRange().setEndingSequenceNumber(SHARD001_END);
+//        shard002.setParentShardId(SHARD001_NAME);
+//
+//        KinesisClientMock mock = new KinesisClientMock("example", shard001, shard002)
+//        {
+//            @Override
+//            protected String getShardIterator0(GetShardIteratorRequest request)
+//            {
+//                if (request.getShardId().equals(SHARD001_NAME))
+//                {
+//                    fail("shard 001 should not have been queried");
+//                }
+//                if (request.getShardId().equals(SHARD002_NAME))
+//                {
+//                    assertEquals("shard 002 iterator type", ShardIteratorType.LATEST.toString(), request.getShardIteratorType());
+//                }
+//                return super.getShardIterator0(request);
+//            }
+//        };
+//        AmazonKinesis client = mock.getInstance();
+//
+//        Map<String,String> iterators = KinesisUtils.retrieveShardIterators(client, "example", null, ShardIteratorType.LATEST, 1000L);
+//
+//        assertEquals("size of returned map",                1, iterators.size());
+//        assertNull("did not return iterator for shard 1",   iterators.get(SHARD001_NAME));
+//        assertNotEmpty("returned iterator for shard 2",     iterators.get(SHARD002_NAME));
+//        assertEquals("invocation count, describeStream",    1, mock.describeInvocationCount.get());
+//        assertEquals("invocation count, getShardIterator",  1, mock.retrieveInvocationCount.get());
+//    }
+
+
+//    @Test
+//    public void testPickParentWhenRelevant() throws Exception
+//    {
+//        Map<String,String> offsets = new HashMap<String,String>();
+//        offsets.put(SHARD001_NAME, SHARD001_MID);
+//
+//        shard001.getSequenceNumberRange().setEndingSequenceNumber(SHARD001_END);
+//        shard002.setParentShardId(SHARD001_NAME);
+//
+//        KinesisClientMock mock = new KinesisClientMock("example", shard001, shard002)
+//        {
+//            @Override
+//            protected String getShardIterator0(GetShardIteratorRequest request)
+//            {
+//                if (request.getShardId().equals(SHARD001_NAME))
+//                {
+//                    assertEquals("shard 001 iterator type",     ShardIteratorType.AFTER_SEQUENCE_NUMBER.toString(), request.getShardIteratorType());
+//                    assertEquals("shard 001 sequence number",   SHARD001_MID,                                       request.getStartingSequenceNumber());
+//                }
+//                if (request.getShardId().equals(SHARD002_NAME))
+//                {
+//                    fail("shard 002 should not have been queried");
+//                }
+//                return super.getShardIterator0(request);
+//            }
+//        };
+//        AmazonKinesis client = mock.getInstance();
+//
+//        Map<String,String> iterators = KinesisUtils.retrieveShardIterators(client, "example", offsets, ShardIteratorType.LATEST, 1000L);
+//
+//        assertEquals("size of returned map",                1, iterators.size());
+//        assertNotEmpty("returned iterator for shard 1",     iterators.get(SHARD001_NAME));
+//        assertNull("did not returned iterator for shard 2", iterators.get(SHARD002_NAME));
+//        assertEquals("invocation count, describeStream",    1, mock.describeInvocationCount.get());
+//        assertEquals("invocation count, getShardIterator",  1, mock.retrieveInvocationCount.get());
+//    }
+
+
+//    @Test
+//    public void testPickChildWhenParentNotRelevant() throws Exception
+//    {
+//        Map<String,String> offsets = new HashMap<String,String>();
+//        offsets.put(SHARD002_NAME, SHARD002_MID);
+//
+//        shard001.getSequenceNumberRange().setEndingSequenceNumber(SHARD001_END);
+//        shard002.setParentShardId(SHARD001_NAME);
+//
+//        KinesisClientMock mock = new KinesisClientMock("example", shard001, shard002)
+//        {
+//            @Override
+//            protected String getShardIterator0(GetShardIteratorRequest request)
+//            {
+//                if (request.getShardId().equals(SHARD001_NAME))
+//                {
+//                    fail("shard 001 should not have been queried");
+//                }
+//                if (request.getShardId().equals(SHARD002_NAME))
+//                {
+//                    assertEquals("shard 002 iterator type",     ShardIteratorType.AFTER_SEQUENCE_NUMBER.toString(), request.getShardIteratorType());
+//                    assertEquals("shard 002 sequence number",   SHARD001_MID,                                       request.getStartingSequenceNumber());
+//                }
+//                return super.getShardIterator0(request);
+//            }
+//        };
+//        AmazonKinesis client = mock.getInstance();
+//
+//        Map<String,String> iterators = KinesisUtils.retrieveShardIterators(client, "example", offsets, ShardIteratorType.LATEST, 1000L);
+//
+//        assertEquals("size of returned map",                1, iterators.size());
+//        assertNull("did not returned iterator for shard 1", iterators.get(SHARD001_NAME));
+//        assertNotEmpty("returned iterator for shard 2",     iterators.get(SHARD002_NAME));
+//        assertEquals("invocation count, describeStream",    1, mock.describeInvocationCount.get());
+//        assertEquals("invocation count, getShardIterator",  1, mock.retrieveInvocationCount.get());
+//    }
+
+
+    @Test
     public void testThrottling() throws Exception
     {
         // expected call sequence:
