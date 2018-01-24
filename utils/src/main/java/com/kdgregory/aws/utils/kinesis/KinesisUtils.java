@@ -17,8 +17,11 @@ package com.kdgregory.aws.utils.kinesis;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.model.*;
@@ -435,6 +438,56 @@ public class KinesisUtils
     }
 
 
+    /**
+     *  Orders the provided shards by parent-child relationship.
+     *
+     *  To support testing, shards within a single generation will be sorted
+     *  by ID. This does not reflect any documented behavior of AWS.
+     */
+    public static List<Shard> sortShardsByAncestry(Map<String,Shard> shardsById)
+    {
+        List<Shard> result = new ArrayList<Shard>(shardsById.size());
+        Set<String> shardsAlreadyProcessed = new HashSet<String>();
+        Set<String> shardsToProcess = new HashSet<String>();
+
+        // step 1: find the ultimate parents
+
+        for (Shard shard : shardsById.values())
+        {
+            if (shardsById.containsKey(shard.getParentShardId()))   shardsToProcess.add(shard.getShardId());
+            else                                                    shardsAlreadyProcessed.add(shard.getShardId());
+        }
+
+        for (String shardId : new TreeSet<String>(shardsAlreadyProcessed))
+        {
+            result.add(shardsById.get(shardId));
+        }
+
+        // step 2: work through the rest of the shards
+
+        while (shardsToProcess.size() > 0)
+        {
+            TreeSet<String> siblings = new TreeSet<String>();
+            for (String shardId : shardsToProcess)
+            {
+                Shard shard = shardsById.get(shardId);
+                if (shardsAlreadyProcessed.contains(shard.getParentShardId()))
+                {
+                    siblings.add(shardId);
+                }
+            }
+
+            for (String shardId : siblings)
+            {
+                shardsAlreadyProcessed.add(shardId);
+                shardsToProcess.remove(shardId);
+                result.add(shardsById.get(shardId));
+            }
+        }
+
+        return result;
+    }
+
 //----------------------------------------------------------------------------
 //  Internals
 //----------------------------------------------------------------------------
@@ -456,7 +509,7 @@ public class KinesisUtils
         }
 
         Map<String,ShardIteratorType> result = new HashMap<String,ShardIteratorType>();
-        for (Shard shard : shards)
+        for (Shard shard : sortShardsByAncestry(shardsById))
         {
             String shardId = shard.getShardId();
             String savedOffset = seqnums.get(shardId);
@@ -472,4 +525,5 @@ public class KinesisUtils
         }
         return result;
     }
+
 }
