@@ -348,24 +348,41 @@ public class KinesisUtils
     /**
      *  Retrieves shard iterators for the specified stream. The goal of this
      *  function is to allow uninterrupted reading of a stream based on saved
-     *  offsets, so the following rules are applied to the results:
+     *  sequence numbers. To do this it uses the following rules to determine
+     *  which of a stream's shards to return, and what type of iterator to
+     *  return for them:
+     *
      *  <ul>
-     *  <li> For any currently-open shard that is in the map, this function
-     *       will return an <code>AFTER_SEQUENCE_NUMBER</code> iterator (this
-     *       is the normal case).
-     *  <li> For any closed shard that is in the map, this function will return
-     *       an <code>AFTER_SEQUENCE_NUMBER</code> iterator if-and-only-if the
-     *       last sequence number in the shard's range is greater than that in
-     *       the supplied map.
-     *  <li> For any closed shard that is in the map, where the last sequence
-     *       number in the shard is equal to the number in the map, this function
-     *       will return a <code>TRIM_HORIZON</code> iterator for each of the
-     *       shard's children.
-     *  <li> For any open shard in the stream that is not in the map and does not
-     *       have a parent in the map, returns an iterator using the provided
-     *       default iterator type.
+     *  <li> For shards that are in the sequence map:
+     *       <ol>
+     *       <li> If the shard is open (no ending sequence number), returns an
+     *            <code>AFTER_SEQUENCE_NUMBER</code> iterator and ignores any
+     *            parent shards in the stream.
+     *       <li> If the shard is closed and the saved sequence number is less
+     *            than the ending sequence number, returns an
+     *            <code>AFTER_SEQUENCE_NUMBER</code> iterator and ignores any
+     *            parent or child shards in the stream.
+     *       <li> If the shard is closed, and the saved sequence number equals
+     *            the ending sequence number of the shard, returns a
+     *            <code>TRIM_HORIZON</code> iterator for any children that are
+     *            not themselves in the map. This should be a rare occurrence.
+     *       <li> If the shard is closed, the saved sequence number equals the
+     *            ending sequence number of the shard, and there are no child
+     *            shards in the stream, does not return an iterator. This will
+     *            only happen if the map is well out-of-date and there have
+     *            been multiple reshardings since the sequence numbers were saved.
+     *       </ol>
+     *  <li> When there are parent and child shards, neither of which are in the
+     *       sequence map, one is chosen depending on default iterator type: the
+     *       parent if <code>TRIM_HORIZON</code>, the child if <code>LATEST</code>
+     *  <li> For shards that are not in the sequence map, and do not have parents
+     *       that were handled by a previous rule, returns the default iterator.
      *  </ul>
-     *  To start reading a stream from its beginning, supply an empty map.
+     *
+     *  To start reading a stream from its beginning, supply an empty map and
+     *  a default iterator type of <code>TRIM_HORIZON</code>. To start reading
+     *  a stream from its end, supply an empty map and a default iterator type
+     *  <code>LATEST</code>.
      *
      *  @param  client      The AWS client used to make requests.
      *  @param  streamName  The name of the stream.
@@ -388,13 +405,28 @@ public class KinesisUtils
     {
         long timeoutAt = System.currentTimeMillis() + timeout;
 
-        // the user might not have supplied offsets but we still need to query the map
+        // this handles the case where the user gives us a null map
         if (seqnums == null) seqnums = Collections.emptyMap();
 
         List<Shard> shards = describeShards(client, streamName, timeout);
         if (shards == null) return null;
 
-        Map<String,ShardIteratorType> retrieveTypes = identifyShardsToRetrieve(shards, seqnums, defaultType);
+        // this map lets us traverse parent-child relationships
+        Map<String,Shard> shardsById = new HashMap<String,Shard>();
+        for (Shard shard : shards)
+        {
+            shardsById.put(shard.getShardId(), shard);
+        }
+
+        // we work our way through parent-child relationships to find iterators
+        Map<String,ShardIteratorType> retrieveTypes = new HashMap<String,ShardIteratorType>();
+        for (Shard shard : shards)
+        {
+            if (! shardsById.containsKey(shard.getParentShardId()))
+            {
+                retrieveTypes.putAll(identifyIterators(shard, shardsById, seqnums, defaultType));
+            }
+        }
 
         Map<String,String> result = new HashMap<String,String>();
         int shardsProcessed = 0;
@@ -441,8 +473,8 @@ public class KinesisUtils
     /**
      *  Orders the provided shards by parent-child relationship.
      *
-     *  To support testing, shards within a single generation will be sorted
-     *  by ID. This does not reflect any documented behavior of AWS.
+     *  To support testing, shards within a single generation are sorted by ID.
+     *  This does not reflect any documented behavior of AWS.
      */
     public static List<Shard> sortShardsByAncestry(Map<String,Shard> shardsById)
     {
@@ -493,36 +525,78 @@ public class KinesisUtils
 //----------------------------------------------------------------------------
 
     /**
-     *  This function is called by retrieveShardIterators() to figure out which
-     *  shards to retrieve and how to retrieve them. The returned map only holds
-     *  shards that we should retrieve, so that it can be used to verify that we
-     *  retrieved all shards that we should.
+     *  Finds the iterators that apply to a given shard and its descendents.
+     *  This is called with an "ultimate parent" by retrieveShardIterators(),
+     *  and recursively looks at that shard's descendents (if any).
      */
-    private static Map<String,ShardIteratorType> identifyShardsToRetrieve(
-        List<Shard> shards, Map<String,String> seqnums, ShardIteratorType defaultType)
+    private static Map<String,ShardIteratorType> identifyIterators(
+        Shard shard, Map<String,Shard> shardsById, Map<String,String> seqnums, ShardIteratorType defaultType)
     {
-        // this map lets us follow parent-child relationships
-        Map<String,Shard> shardsById = new HashMap<String,Shard>();
-        for (Shard shard : shards)
-        {
-            shardsById.put(shard.getShardId(), shard);
-        }
-
         Map<String,ShardIteratorType> result = new HashMap<String,ShardIteratorType>();
-        for (Shard shard : sortShardsByAncestry(shardsById))
-        {
-            String shardId = shard.getShardId();
-            String savedOffset = seqnums.get(shardId);
+        String shardId = shard.getShardId();
 
-            if (savedOffset == null)
+        if (seqnums.containsKey(shardId) && (! seqnums.get(shardId).equals(shard.getSequenceNumberRange().getEndingSequenceNumber())))
+        {
+            // we have a valid pointer into this shard so use it whether or not the shard has children
+            result.put(shardId, ShardIteratorType.AFTER_SEQUENCE_NUMBER);
+            return result;
+        }
+
+        List<String> childIds = new ArrayList<String>();
+        for (Shard ss : shardsById.values())
+        {
+            if (shardId.equals(ss.getParentShardId()))
+                childIds.add(ss.getShardId());
+        }
+
+        if (childIds.isEmpty())
+        {
+            // no children, no saved sequence number, return default
+            result.put(shardId, defaultType);
+            return result;
+        }
+
+        for (String childId : childIds)
+        {
+            if (seqnums.containsKey(childId))
             {
-                result.put(shardId, defaultType);
-            }
-            else if (! savedOffset.equals(shard.getSequenceNumberRange().getEndingSequenceNumber()))
-            {
-                result.put(shardId, ShardIteratorType.AFTER_SEQUENCE_NUMBER);
+                result.putAll(identifyIterators(shardsById.get(childId), shardsById, seqnums, defaultType));
             }
         }
+
+        if (result.size() == childIds.size())
+        {
+            // we had stored sequence numbers for all children so we're done
+            return result;
+        }
+
+        if (result.size() > 0)
+        {
+            // some children had stored offsets so we want to start reading at start of others
+            for (String childId : childIds)
+            {
+                if (! result.containsKey(childId))
+                {
+                    result.put(childId, ShardIteratorType.TRIM_HORIZON);
+                }
+            }
+            return result;
+        }
+
+        // no sequence number for this shard, no sequence numbers for any children, so either return oldest
+        // possible iterator or latest possible iterator
+        if (defaultType == ShardIteratorType.TRIM_HORIZON)
+        {
+            result.put(shardId, ShardIteratorType.TRIM_HORIZON);
+        }
+        else
+        {
+            for (String childId : childIds)
+            {
+                result.put(childId, ShardIteratorType.LATEST);
+            }
+        }
+
         return result;
     }
 
