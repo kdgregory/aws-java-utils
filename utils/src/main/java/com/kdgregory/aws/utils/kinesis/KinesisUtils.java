@@ -469,57 +469,6 @@ public class KinesisUtils
              : null;
     }
 
-
-    /**
-     *  Orders the provided shards by parent-child relationship.
-     *
-     *  To support testing, shards within a single generation are sorted by ID.
-     *  This does not reflect any documented behavior of AWS.
-     */
-    public static List<Shard> sortShardsByAncestry(Map<String,Shard> shardsById)
-    {
-        List<Shard> result = new ArrayList<Shard>(shardsById.size());
-        Set<String> shardsAlreadyProcessed = new HashSet<String>();
-        Set<String> shardsToProcess = new HashSet<String>();
-
-        // step 1: find the ultimate parents
-
-        for (Shard shard : shardsById.values())
-        {
-            if (shardsById.containsKey(shard.getParentShardId()))   shardsToProcess.add(shard.getShardId());
-            else                                                    shardsAlreadyProcessed.add(shard.getShardId());
-        }
-
-        for (String shardId : new TreeSet<String>(shardsAlreadyProcessed))
-        {
-            result.add(shardsById.get(shardId));
-        }
-
-        // step 2: work through the rest of the shards
-
-        while (shardsToProcess.size() > 0)
-        {
-            TreeSet<String> siblings = new TreeSet<String>();
-            for (String shardId : shardsToProcess)
-            {
-                Shard shard = shardsById.get(shardId);
-                if (shardsAlreadyProcessed.contains(shard.getParentShardId()))
-                {
-                    siblings.add(shardId);
-                }
-            }
-
-            for (String shardId : siblings)
-            {
-                shardsAlreadyProcessed.add(shardId);
-                shardsToProcess.remove(shardId);
-                result.add(shardsById.get(shardId));
-            }
-        }
-
-        return result;
-    }
-
 //----------------------------------------------------------------------------
 //  Internals
 //----------------------------------------------------------------------------
