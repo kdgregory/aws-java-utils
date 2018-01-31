@@ -16,12 +16,10 @@ package com.kdgregory.aws.utils.kinesis;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
 
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.model.*;
@@ -346,6 +344,68 @@ public class KinesisUtils
 
 
     /**
+     *  Retrieves a single shard iterator, where the caller knows what type
+     *  of iterator to retrieve.
+     *
+     *  @param  client          The AWS client used to make requests.
+     *  @param  streamName      The name of the stream.
+     *  @param  shardId         The shard identifier.
+     *  @param  iteratorType    The type of iterator to retrieve.
+     *  @param  sequenceNumber  The relevant sequence number, for iterator types
+     *                          that need one. Ignored for iterator types that don't.
+     *  @param  timestamp       A starting timestamp, for the AT_TIMESTAMP iterator
+     *                          type only. Ignored for all other iterator types.
+     *  @param  timeout         The number of milliseconds to attempt retries due
+     *                          to throttling.
+     *
+     *  @return The shard iterator, null if unable to do so within timeout.
+     *
+     *  @throws All non-throttling exceptions from underlying call.
+     *
+     */
+    public static String retrieveShardIterator(
+        AmazonKinesis client, String streamName, String shardId,
+        ShardIteratorType iteratorType, String sequenceNumber, Date timestamp,
+        long timeout)
+    {
+        GetShardIteratorRequest request = new GetShardIteratorRequest()
+                      .withStreamName(streamName)
+                      .withShardId(shardId)
+                      .withShardIteratorType(iteratorType);
+
+        switch (iteratorType)
+        {
+            case AT_SEQUENCE_NUMBER:
+            case AFTER_SEQUENCE_NUMBER:
+                request.setStartingSequenceNumber(sequenceNumber);
+                break;
+            case AT_TIMESTAMP:
+                request.setTimestamp(timestamp);
+                break;
+            default:
+                // nothing special
+        }
+
+        long timeoutAt = System.currentTimeMillis() + timeout;
+        long currentSleepTime = 100;
+        while (System.currentTimeMillis() < timeoutAt)
+        {
+            try
+            {
+                GetShardIteratorResult response = client.getShardIterator(request);
+                return response.getShardIterator();
+            }
+            catch (ProvisionedThroughputExceededException ex)
+            {
+                CommonUtils.sleepQuietly(currentSleepTime);
+                currentSleepTime *= 2;
+            }
+        }
+        return null;
+    }
+
+
+    /**
      *  Retrieves shard iterators for the specified stream. The goal of this
      *  function is to allow uninterrupted reading of a stream based on saved
      *  sequence numbers. To do this it uses the following rules to determine
@@ -429,7 +489,6 @@ public class KinesisUtils
         }
 
         Map<String,String> result = new HashMap<String,String>();
-        int shardsProcessed = 0;
         for (Shard shard : shards)
         {
             String shardId = shard.getShardId();
@@ -437,36 +496,18 @@ public class KinesisUtils
             if (retrieveType == null)
                 continue;
 
-            long currentSleepTime = 100;
-            while (System.currentTimeMillis() < timeoutAt)
-            {
-                try
-                {
-                    GetShardIteratorRequest request = new GetShardIteratorRequest()
-                                  .withStreamName(streamName)
-                                  .withShardId(shardId)
-                                  .withShardIteratorType(retrieveType);
-                    if (retrieveType == ShardIteratorType.AFTER_SEQUENCE_NUMBER)
-                    {
-                        request.setStartingSequenceNumber(seqnums.get(shardId));
-                    }
+            long requestTimeout = timeoutAt - System.currentTimeMillis();
+            if (requestTimeout < 0)
+                return null;
 
-                    GetShardIteratorResult response = client.getShardIterator(request);
-                    result.put(shardId, response.getShardIterator());
-                    shardsProcessed++;
-                    break;
-                }
-                catch (ProvisionedThroughputExceededException ex)
-                {
-                    CommonUtils.sleepQuietly(currentSleepTime);
-                    currentSleepTime *= 2;
-                }
-            }
+            String shardIterator = retrieveShardIterator(client, streamName, shardId, retrieveType, seqnums.get(shardId), null, requestTimeout);
+            if (shardIterator == null)
+                return null;
+
+            result.put(shardId, shardIterator);
         }
 
-        return shardsProcessed == retrieveTypes.size()
-             ? result
-             : null;
+        return result;
     }
 
 //----------------------------------------------------------------------------
