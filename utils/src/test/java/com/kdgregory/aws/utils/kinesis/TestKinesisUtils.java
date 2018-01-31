@@ -16,6 +16,7 @@ package com.kdgregory.aws.utils.kinesis;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -38,6 +39,8 @@ public class TestKinesisUtils
 //----------------------------------------------------------------------------
 //  Sample data -- only populated with fields that we actually use
 //----------------------------------------------------------------------------
+
+    private static final Date NOW = new Date();
 
     private static final List<Shard> SHARDS_1 = Arrays.asList(
                                         new Shard().withShardId("0001"),
@@ -704,5 +707,129 @@ public class TestKinesisUtils
         assertEquals("invocations of increaseStreamRetentionPeriod",    0,  mock.increaseInvocationCount.get());
         assertEquals("invocations of decreaseStreamRetentionPeriod",    1,  mock.decreaseInvocationCount.get());
         assertApproximate("elapsed time",                               100, elapsed, 10);
+    }
+
+
+    @Test
+    public void testRetrieveShardIteratorLatest() throws Exception
+    {
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
+            {
+                assertEquals("stream name",         "example",                                  request.getStreamName());
+                assertEquals("shard ID",            "shard-0001",                               request.getShardId());
+                assertEquals("iterator type",       ShardIteratorType.LATEST.toString(),        request.getShardIteratorType());
+                assertEquals("sequence number",     null,                                       request.getStartingSequenceNumber());
+                assertEquals("starting timestamp",  null,                                       request.getTimestamp());
+                return new GetShardIteratorResult().withShardIterator("blah blah blah");
+            }
+        }.getInstance();
+
+        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, "example", "shard-0001", ShardIteratorType.LATEST, "123", NOW, 1000L));
+    }
+
+
+    @Test
+    public void testRetrieveShardIteratorTrimHorizon() throws Exception
+    {
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
+            {
+                assertEquals("stream name",         "example",                                  request.getStreamName());
+                assertEquals("shard ID",            "shard-0001",                               request.getShardId());
+                assertEquals("iterator type",       ShardIteratorType.TRIM_HORIZON.toString(),  request.getShardIteratorType());
+                assertEquals("sequence number",     null,                                       request.getStartingSequenceNumber());
+                assertEquals("starting timestamp",  null,                                       request.getTimestamp());
+                return new GetShardIteratorResult().withShardIterator("blah blah blah");
+            }
+        }.getInstance();
+
+        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, "example", "shard-0001", ShardIteratorType.TRIM_HORIZON, "123", NOW, 1000L));
+    }
+
+
+    @Test
+    public void testRetrieveShardIteratorAtSequenceNumber() throws Exception
+    {
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
+            {
+                assertEquals("stream name",         "example",                                          request.getStreamName());
+                assertEquals("shard ID",            "shard-0001",                                       request.getShardId());
+                assertEquals("iterator type",       ShardIteratorType.AT_SEQUENCE_NUMBER.toString(),    request.getShardIteratorType());
+                assertEquals("sequence number",     "123",                                              request.getStartingSequenceNumber());
+                assertEquals("starting timestamp",  null,                                               request.getTimestamp());
+                return new GetShardIteratorResult().withShardIterator("blah blah blah");
+            }
+        }.getInstance();
+
+        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, "example", "shard-0001", ShardIteratorType.AT_SEQUENCE_NUMBER, "123", NOW, 1000L));
+    }
+
+
+    @Test
+    public void testRetrieveShardIteratorAfterSequenceNumber() throws Exception
+    {
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
+            {
+                assertEquals("stream name",         "example",                                          request.getStreamName());
+                assertEquals("shard ID",            "shard-0001",                                       request.getShardId());
+                assertEquals("iterator type",       ShardIteratorType.AFTER_SEQUENCE_NUMBER.toString(), request.getShardIteratorType());
+                assertEquals("sequence number",     "123",                                              request.getStartingSequenceNumber());
+                assertEquals("starting timestamp",  null,                                               request.getTimestamp());
+                return new GetShardIteratorResult().withShardIterator("blah blah blah");
+            }
+        }.getInstance();
+
+        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, "example", "shard-0001", ShardIteratorType.AFTER_SEQUENCE_NUMBER, "123", NOW, 1000L));
+    }
+
+
+    @Test
+    public void testRetrieveShardIteratorAtTimestamp() throws Exception
+    {
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
+            {
+                assertEquals("stream name",         "example",                                  request.getStreamName());
+                assertEquals("shard ID",            "shard-0001",                               request.getShardId());
+                assertEquals("iterator type",       ShardIteratorType.AT_TIMESTAMP.toString(),  request.getShardIteratorType());
+                assertEquals("sequence number",     null,                                       request.getStartingSequenceNumber());
+                assertEquals("starting timestamp",  NOW,                                        request.getTimestamp());
+                return new GetShardIteratorResult().withShardIterator("blah blah blah");
+            }
+        }.getInstance();
+
+        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, "example", "shard-0001", ShardIteratorType.AT_TIMESTAMP, "123", NOW, 1000L));
+    }
+
+
+    @Test
+    public void testRetrieveShardIteratorThrottling() throws Exception
+    {
+        AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
+        {
+            @SuppressWarnings("unused")
+            public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
+            {
+                throw new ProvisionedThroughputExceededException("");
+            }
+        }.getInstance();
+
+        long start = System.currentTimeMillis();
+        assertNull("return value", KinesisUtils.retrieveShardIterator(client, "example", "shard-0001", ShardIteratorType.AT_TIMESTAMP, "123", NOW, 250L));
+        long elapsed = System.currentTimeMillis() - start;
+        assertApproximate("elapsed time", 300, elapsed, 10);
     }
 }

@@ -103,7 +103,7 @@ public class TestKinesisUtilsRetrieveShardIterators
     }
 
 //----------------------------------------------------------------------------
-//  Testcases for retrieveShardIterators()
+//  Tests 
 //----------------------------------------------------------------------------
 
     @Test
@@ -115,7 +115,7 @@ public class TestKinesisUtilsRetrieveShardIterators
             protected String getShardIterator0(GetShardIteratorRequest request)
             {
                 assertEquals("stream name",     expectedStreamName,                         request.getStreamName());
-                assertEquals("shard ID",        SHARD001_ID,                              request.getShardId());
+                assertEquals("shard ID",        SHARD001_ID,                                request.getShardId());
                 assertEquals("iterator type",   ShardIteratorType.TRIM_HORIZON.toString(),  request.getShardIteratorType());
                 return super.getShardIterator0(request);
             }
