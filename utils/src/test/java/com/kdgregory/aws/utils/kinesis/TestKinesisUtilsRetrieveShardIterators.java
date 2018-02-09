@@ -478,8 +478,8 @@ public class TestKinesisUtilsRetrieveShardIterators
         Map<String,String> iterators = KinesisUtils.retrieveShardIterators(client, "example", null, ShardIteratorType.LATEST, 1000L);
 
         assertEquals("size of returned map",                1, iterators.size());
-        assertNull("did not returned iterator for shard 1", iterators.get(SHARD001_ID));
-        assertNull("did not returned iterator for shard 2", iterators.get(SHARD002_ID));
+        assertNull("did not return iterator for shard 1", iterators.get(SHARD001_ID));
+        assertNull("did not return iterator for shard 2", iterators.get(SHARD002_ID));
         assertNotEmpty("returned iterator for shard 3",     iterators.get(SHARD003_ID));
         assertEquals("invocation count, describeStream",    1, mock.describeInvocationCount.get());
         assertEquals("invocation count, getShardIterator",  1, mock.retrieveInvocationCount.get());
@@ -519,9 +519,9 @@ public class TestKinesisUtilsRetrieveShardIterators
         Map<String,String> iterators = KinesisUtils.retrieveShardIterators(client, "example", null, ShardIteratorType.TRIM_HORIZON, 1000L);
 
         assertEquals("size of returned map",                1, iterators.size());
-        assertNull("did not returned iterator for shard 1", iterators.get(SHARD001_ID));
-        assertNull("did not returned iterator for shard 2", iterators.get(SHARD002_ID));
-        assertNotEmpty("returned iterator for shard 3",     iterators.get(SHARD003_ID));
+        assertNotEmpty("returned iterator for shard 1", iterators.get(SHARD001_ID));
+        assertNull("did not return iterator for shard 2", iterators.get(SHARD002_ID));
+        assertNull("did not return iterator for shard 3",     iterators.get(SHARD003_ID));
         assertEquals("invocation count, describeStream",    1, mock.describeInvocationCount.get());
         assertEquals("invocation count, getShardIterator",  1, mock.retrieveInvocationCount.get());
     }
@@ -561,12 +561,12 @@ public class TestKinesisUtilsRetrieveShardIterators
         };
         AmazonKinesis client = mock.getInstance();
 
-        Map<String,String> iterators = KinesisUtils.retrieveShardIterators(client, "example", null, ShardIteratorType.TRIM_HORIZON, 1000L);
+        Map<String,String> iterators = KinesisUtils.retrieveShardIterators(client, "example", offsets, ShardIteratorType.TRIM_HORIZON, 1000L);
 
         assertEquals("size of returned map",                1, iterators.size());
-        assertNull("did not returned iterator for shard 1", iterators.get(SHARD001_ID));
+        assertNull("did not return iterator for shard 1", iterators.get(SHARD001_ID));
         assertNotEmpty("returned iterator for shard 2",     iterators.get(SHARD002_ID));
-        assertNull("did not returned iterator for shard 3", iterators.get(SHARD003_ID));
+        assertNull("did not return iterator for shard 3", iterators.get(SHARD003_ID));
         assertEquals("invocation count, describeStream",    1, mock.describeInvocationCount.get());
         assertEquals("invocation count, getShardIterator",  1, mock.retrieveInvocationCount.get());
     }
