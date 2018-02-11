@@ -19,6 +19,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -591,26 +592,39 @@ public class KinesisUtils
             return result;
         }
 
-        if ((childrenWithSeqnums > 0) && (childrenWithSeqnums < children.size()))
+        if (childrenWithSeqnums == 0)
         {
-            // some children had sequence numbers so the other will get TRIM_HORIZON
-            for (Map.Entry<String,ShardIteratorType> entry : result.entrySet())
+            // all of the children were given the default iterator type; this is OK
+            // unless the iterator type is TRIM_HORIZON, in which case the current
+            // shard should be the horizon rather than its children
+            if (defaultType == ShardIteratorType.TRIM_HORIZON)
             {
-                if (entry.getValue() != ShardIteratorType.AFTER_SEQUENCE_NUMBER)
-                {
-                    entry.setValue(ShardIteratorType.TRIM_HORIZON);
-                }
+                result.clear();
+                result.put(shardId, ShardIteratorType.TRIM_HORIZON);
             }
             return result;
         }
 
-        // at this point all children should have been given the default iterator type
-        // this is good unless the caller hasn't seen our records yet, in which case we
-        // become the new horizon
-        if ((defaultType == ShardIteratorType.TRIM_HORIZON) && !seqnums.containsKey(shardId))
+        // some children have sequence numbers, so those that don't will get TRIM_HORIZON
+        // however, there's a corner case in which the results might contain a non-child
+        // descendent, so we have to remove all of those and replace them with their parent
+
+        for (String key : new HashSet<String>(result.keySet()))
         {
-            result.clear();
-            result.put(shardId, ShardIteratorType.TRIM_HORIZON);
+            if (result.get(key) == ShardIteratorType.AFTER_SEQUENCE_NUMBER)
+            {
+                continue;
+            }
+
+            while (! shardId.equals(shardsById.get(key).getParentShardId()))
+            {
+                String parentKey = shardsById.get(key).getParentShardId();
+                result.remove(key);
+                result.put(parentKey, null);   // dummy value
+                key = parentKey;
+            }
+
+            result.put(key, ShardIteratorType.TRIM_HORIZON);
         }
 
         return result;
