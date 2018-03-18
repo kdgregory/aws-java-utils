@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.model.*;
@@ -415,30 +416,23 @@ public class KinesisUtils
      *  return for them:
      *
      *  <ul>
-     *  <li> For shards that are in the sequence map:
-     *       <ol>
-     *       <li> If the shard is open (no ending sequence number), returns an
-     *            <code>AFTER_SEQUENCE_NUMBER</code> iterator and ignores any
-     *            parent shards in the stream.
-     *       <li> If the shard is closed and the saved sequence number is less
-     *            than the ending sequence number, returns an
-     *            <code>AFTER_SEQUENCE_NUMBER</code> iterator and ignores any
-     *            parent or child shards in the stream.
-     *       <li> If the shard is closed, and the saved sequence number equals
-     *            the ending sequence number of the shard, returns a
-     *            <code>TRIM_HORIZON</code> iterator for any children that are
-     *            not themselves in the map. This should be a rare occurrence.
-     *       <li> If the shard is closed, the saved sequence number equals the
-     *            ending sequence number of the shard, and there are no child
-     *            shards in the stream, does not return an iterator. This will
-     *            only happen if the map is well out-of-date and there have
-     *            been multiple reshardings since the sequence numbers were saved.
-     *       </ol>
-     *  <li> When there are parent and child shards, neither of which are in the
-     *       sequence map, one is chosen depending on default iterator type: the
-     *       parent if <code>TRIM_HORIZON</code>, the child if <code>LATEST</code>
-     *  <li> For shards that are not in the sequence map, and do not have parents
-     *       that were handled by a previous rule, returns the default iterator.
+     *  <li> If a shard is in the sequence map and the saved sequence number
+     *       is less than the ending sequence number of the shard, returns an
+     *       <code>AFTER_SEQUENCE_NUMBER</code> iterator based on the saved
+     *       sequence number. This is the normal case for working with saved
+     *       sequence numbers.
+     *  <li> If a shard is in the sequence map but the saved sequence number
+     *       equals the ending sequence number of the shard, returns a
+     *       <code>TRIM_HORIZON</code> iterator. This handles the case where
+     *       a shard is split: the program would normally consume the entire
+     *       shard and then reload iterators.
+     *  <li> If there are saved offsets for any siblings of a shard, returns
+     *       a <code>TRIM_HORIZON</code> for that shard. This handles the
+     *       case where a shard is split and the program only reads (and saves
+     *       offsets from) one of the children.
+     *  <li> If there are no offsets for any of the current shards, returns
+     *       the default iterator type. This handles the case of starting a
+     *       new reader.
      *  </ul>
      *
      *  To start reading a stream from its beginning, supply an empty map and
@@ -473,25 +467,12 @@ public class KinesisUtils
         List<Shard> shards = describeShards(client, streamName, timeout);
         if (shards == null) return null;
 
-        // this map lets us traverse parent-child relationships
-        Map<String,Shard> shardsById = getShardsById(shards);
-
-        // we identify iterators based on trees of parent/child shard relationships,
-        // starting with the ultimate ancestors (those that have no active parents)
-        Map<String,ShardIteratorType> retrieveTypes = new HashMap<String,ShardIteratorType>();
-        for (Shard shard : shards)
-        {
-            if (! shardsById.containsKey(shard.getParentShardId()))
-            {
-                retrieveTypes.putAll(identifyIterators(shard, shardsById, seqnums, defaultType));
-            }
-        }
-
+        Map<String,ShardIteratorType> iteratorTypes = identifyIterators(shards, seqnums, defaultType);
         Map<String,String> result = new HashMap<String,String>();
         for (Shard shard : shards)
         {
             String shardId = shard.getShardId();
-            ShardIteratorType retrieveType = retrieveTypes.get(shard.getShardId());
+            ShardIteratorType retrieveType = iteratorTypes.get(shard.getShardId());
             if (retrieveType == null)
                 continue;
 
@@ -547,86 +528,143 @@ public class KinesisUtils
 //----------------------------------------------------------------------------
 
     /**
-     *  Finds the iterators that apply to a given shard and its descendents.
-     *  This is called with an "ultimate parent" by retrieveShardIterators(),
-     *  and recursively looks at that shard's descendents (if any).
+     *  Identifies which of the shards in the stream should be active, and
+     *  returns the iterator types that apply to them.
      */
     private static Map<String,ShardIteratorType> identifyIterators(
-        Shard shard, Map<String,Shard> shardsById, Map<String,String> seqnums, ShardIteratorType defaultType)
+        Collection<Shard> shards, Map<String,String> seqnums, ShardIteratorType defaultType)
     {
-        Map<String,ShardIteratorType> result = new HashMap<String,ShardIteratorType>();
-        String shardId = shard.getShardId();
+        Map<String,Shard> shardsById = new HashMap<String,Shard>();
+        Map<String,Set<String>> childrenByParentId = new HashMap<String,Set<String>>();
+        Set<String> shardsWithSeqnum = new HashSet<String>();
 
-        if (seqnums.containsKey(shardId) && (! seqnums.get(shardId).equals(shard.getSequenceNumberRange().getEndingSequenceNumber())))
+        for (Shard shard : shards)
         {
-            // we have a valid pointer into this shard so use it whether or not the shard has children
-            result.put(shardId, ShardIteratorType.AFTER_SEQUENCE_NUMBER);
-            return result;
-        }
-
-        List<Shard> children = getChildren(shardId, shardsById);
-
-        if (children.isEmpty())
-        {
-            // this shard is an ultimate descendent (or stand-alone) without offsets
-            result.put(shardId, defaultType);
-            return result;
-        }
-
-        // at this point we have an arbitrary tree of descendents, some (or all) of which may
-        // have offsets; the others will be given the default iterator type, and we need to
-        // either accept that default or propagate back to the ultimate ancestor to decide
-
-        int childrenWithSeqnums = 0;
-
-        for (Shard child : children)
-        {
-            result.putAll(identifyIterators(child, shardsById, seqnums, defaultType));
-            if (result.get(child.getShardId()) == ShardIteratorType.AFTER_SEQUENCE_NUMBER)
-                childrenWithSeqnums++;
-        }
-
-        if (childrenWithSeqnums == children.size())
-        {
-            // we had sequence numbers for all children so we're done
-            return result;
-        }
-
-        if (childrenWithSeqnums == 0)
-        {
-            // all of the children were given the default iterator type; this is OK
-            // unless the iterator type is TRIM_HORIZON, in which case the current
-            // shard should be the horizon rather than its children
-            if (defaultType == ShardIteratorType.TRIM_HORIZON)
+            String shardId = shard.getShardId();
+            shardsById.put(shardId, shard);
+            if (seqnums.containsKey(shardId))
             {
-                result.clear();
+                shardsWithSeqnum.add(shardId);
+            }
+            String parentId = shard.getParentShardId();
+            if (shardsById.containsKey(parentId))
+            {
+                Set<String> siblings = childrenByParentId.get(parentId);
+                if (siblings == null)
+                {
+                    siblings = new HashSet<String>();
+                    childrenByParentId.put(parentId, siblings);
+                }
+                siblings.add(shardId);
+            }
+        }
+
+        Set<String> ultimateParents = new HashSet<String>();
+        Set<String> ultimateDescendents = new HashSet<String>();
+        for (Shard shard : shards)
+        {
+            String shardId = shard.getShardId();
+            String parentId = shard.getParentShardId();
+            if (! shardsById.containsKey(parentId))
+            {
+                ultimateParents.add(shardId);
+            }
+            if (childrenByParentId.get(shardId) == null)
+            {
+                ultimateDescendents.add(shardId);
+            }
+        }
+
+
+        Map<String,ShardIteratorType> result = new HashMap<String,ShardIteratorType>();
+        if (shardsWithSeqnum.isEmpty() && (defaultType == ShardIteratorType.TRIM_HORIZON))
+        {
+            for (String shardId : ultimateParents)
+            {
                 result.put(shardId, ShardIteratorType.TRIM_HORIZON);
             }
-            return result;
         }
-
-        // some children have sequence numbers, so those that don't will get TRIM_HORIZON
-        // however, there's a corner case in which the results might contain a non-child
-        // descendent, so we have to remove all of those and replace them with their parent
-
-        for (String key : new HashSet<String>(result.keySet()))
+        else if (shardsWithSeqnum.isEmpty())
         {
-            if (result.get(key) == ShardIteratorType.AFTER_SEQUENCE_NUMBER)
+            for (String shardId : ultimateDescendents)
             {
-                continue;
+                result.put(shardId, ShardIteratorType.LATEST);
             }
-
-            while (! shardId.equals(shardsById.get(key).getParentShardId()))
+        }
+        else
+        {
+            // we have some (maybe all) offsets, so will return AFTER iterators for those
+            // shards with offsets, and TRIM_HORIZON for their siblings without
+            for (String shardId : ultimateParents)
             {
-                String parentKey = shardsById.get(key).getParentShardId();
-                result.remove(key);
-                result.put(parentKey, null);   // dummy value
-                key = parentKey;
+                if (! identifyDescendentOffsets(shardId, shardsById, childrenByParentId, seqnums, result))
+                {
+                    result.put(shardId, ShardIteratorType.TRIM_HORIZON);
+                }
             }
-
-            result.put(key, ShardIteratorType.TRIM_HORIZON);
         }
 
         return result;
     }
+
+
+    /**
+     *  Recursively walks the tree of shards to figure out what types of iterators apply.
+     *  If any node has offsets, then its non-offsetted siblings will get TRIM_HORIZON.
+     *  If any descendent has offsets, its direct ancestors are omitted.
+     */
+    private static boolean identifyDescendentOffsets(
+        String shardId, Map<String,Shard> shardsById, Map<String,Set<String>> childrenByParentId,
+         Map<String,String> seqnums, Map<String,ShardIteratorType> result)
+    {
+        String mySeqnum = seqnums.get(shardId);
+        String myEndingSeqnum = shardsById.get(shardId).getSequenceNumberRange().getEndingSequenceNumber();
+        if ((mySeqnum != null) && (! mySeqnum.equals(myEndingSeqnum)))
+        {
+            // if this node has a valid sequence number we don't have to look further
+            result.put(shardId, ShardIteratorType.AFTER_SEQUENCE_NUMBER);
+            return true;
+        }
+
+        Set<String> childIds = childrenByParentId.get(shardId);
+
+        if (childIds == null)
+        {
+            // if this is an ultimate descendent then we let the parent determine our sequence number
+            return false;
+        }
+
+        Set<String> childrenInResults = new HashSet<String>();
+        for (String childId : childIds)
+        {
+            if (identifyDescendentOffsets(childId, shardsById, childrenByParentId, seqnums, result))
+            {
+                childrenInResults.add(childId);
+            }
+        }
+
+        if (childrenInResults.size() == 0)
+        {
+            // no children have offsets, we'll defer to parent
+            return false;
+        }
+
+        if (childIds.size() == childrenInResults.size())
+        {
+            // all children accounted-for, we're done here
+            return true;
+        }
+
+        // some children have offsets so we'll give TRIM_HORIZON to the others
+        for (String childId : childIds)
+        {
+            if (! childrenInResults.contains(childId))
+            {
+                result.put(childId, ShardIteratorType.TRIM_HORIZON);
+            }
+        }
+
+        return true;
+    }
+
 }
