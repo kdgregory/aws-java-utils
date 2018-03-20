@@ -55,10 +55,16 @@
 
 
     <dependencies>
-        <dependency>
+         <dependency>
             <groupId>commons-logging</groupId>
             <artifactId>commons-logging</artifactId>
             <version>${commons.logging.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-kinesis</artifactId>
+            <version>${aws-sdk.version}</version>
             <scope>provided</scope>
         </dependency>
 
@@ -72,12 +78,6 @@
             <groupId>net.sf.kdgcommons</groupId>
             <artifactId>kdgcommons</artifactId>
             <version>${kdgcommons.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>net.sf.practicalxml</groupId>
-            <artifactId>practicalxml</artifactId>
-            <version>${practicalxml.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
