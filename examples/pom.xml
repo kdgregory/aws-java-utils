@@ -53,8 +53,13 @@
             <groupId>com.kdgregory.aws</groupId>
             <artifactId>aws-java-utils</artifactId>
             <version>${project.version}</version>
-        </dependency>        
+        </dependency>
 
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-kinesis</artifactId>
+            <version>${aws-sdk.version}</version>
+        </dependency>
         <dependency>
             <groupId>net.sf.kdgcommons</groupId>
             <artifactId>kdgcommons</artifactId>

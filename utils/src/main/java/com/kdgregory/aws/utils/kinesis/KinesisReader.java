@@ -72,7 +72,7 @@ implements Iterable<Record>
     private ShardIteratorType defaultIteratorType;
 
     // TODO - make this a configurable option
-    private long timeout = 1000;
+    private long timeout = 5000;
 
     // while the javadoc says that shards are iterated in an arbitrary order, I
     // want a known order for testing; thus the internal maps are TreeMaps
