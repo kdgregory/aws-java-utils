@@ -14,9 +14,11 @@
 
 package com.kdgregory.aws.utils.kinesis;
 
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,7 +46,7 @@ public class TestKinesisReader
 
     private final static String STREAM_NAME = "example";
 
-    private final static List<String> RECORDS_1 = Arrays.asList("foo", "bar");
+    private final static List<String> RECORDS_1 = Arrays.asList("foo", "bar", "baz");
     private final static List<String> RECORDS_2 = Arrays.asList("argle", "bargle");
 
 
@@ -73,6 +75,38 @@ public class TestKinesisReader
     private static int extractOffsetFromSeqnum(String sequenceNumber)
     {
         return Integer.parseInt(sequenceNumber.split(",")[1]);
+    }
+
+
+    /**
+     *  Retrieves all records from a single iteration of the reader. Verifies
+     *  that the reader's offsets are updated after each record is read.
+     */
+    private static List<String> retrieveRecords(KinesisReader reader)
+    throws Exception
+    {
+        List<String> retrievedRecords = new ArrayList<String>();
+        for (Record record : reader)
+        {
+            byte[] recordData = BinaryUtils.copyAllBytesFrom(record.getData());
+            retrievedRecords.add(new String(recordData, "UTF-8"));
+            assertEquals("offsets have been updated",
+                         record.getSequenceNumber(),
+                         reader.getOffsets().get(extractShardIdFromSeqnum(record.getSequenceNumber())));
+        }
+        return retrievedRecords;
+    }
+
+
+    /**
+     *  Uses reflection to extract the current shard iterators from the reader.
+     */
+    private Map<String,String> getShardIterators(KinesisReader reader)
+    throws Exception
+    {
+        Field field = reader.getClass().getDeclaredField("shardIterators");
+        field.setAccessible(true);
+        return (Map<String,String>)field.get(reader);
     }
 
 
@@ -134,24 +168,65 @@ public class TestKinesisReader
         @SuppressWarnings("unused")
         public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
         {
-            // TODO - handle different iterator types
+            assertShardIteratorRequest(request);
+
+            String shardId = request.getShardId();
+
             int offset = 0;
-            return new GetShardIteratorResult()
-                   .withShardIterator(formatSequenceNumber(request.getShardId(), offset));
+            switch (ShardIteratorType.fromValue(request.getShardIteratorType()))
+            {
+                case TRIM_HORIZON :
+                    // default value is OK
+                    break;
+                case LATEST :
+                    offset = recordsByShard.get(shardId).size();
+                    break;
+                case AFTER_SEQUENCE_NUMBER :
+                    offset = extractOffsetFromSeqnum(request.getStartingSequenceNumber()) + 1;
+                    break;
+                default :
+                    throw new IllegalArgumentException("unexpected shard iterator type: " + request.getShardIteratorType());
+            }
+
+            return new GetShardIteratorResult().withShardIterator(formatSequenceNumber(shardId, offset));
         }
 
         @SuppressWarnings("unused")
         public GetRecordsResult getRecords(GetRecordsRequest request)
         {
+            assertGetRecords(request);
+
             String shardItx = request.getShardIterator();
             String shardId = extractShardIdFromSeqnum(shardItx);
             int offset = extractOffsetFromSeqnum(shardItx);
-            // TODO - actually use offset -- will limit records returned by each call
-            List<Record> records = recordsByShard.get(shardId);
+            List<Record> shardRecords = recordsByShard.get(shardId);
+            List<Record> remainingRecords = shardRecords.subList(offset, shardRecords.size());
+            List<Record> returnedRecords = limitReturnedRecords(remainingRecords);
+            String nextShardItx = (offset + returnedRecords.size() == shardRecords.size())
+                                ? null
+                                : formatSequenceNumber(shardId, offset + returnedRecords.size() - 1);
+
             return new GetRecordsResult()
-                   .withRecords(records)
-                   .withNextShardIterator(formatSequenceNumber(shardId, records.size()))
+                   .withRecords(returnedRecords)
+                   .withNextShardIterator(nextShardItx)
                    .withMillisBehindLatest(Long.valueOf(0));
+        }
+
+        // hooks for subclasses
+
+        protected void assertShardIteratorRequest(GetShardIteratorRequest request)
+        {
+            // default does nothing
+        }
+
+        protected void assertGetRecords(GetRecordsRequest request)
+        {
+            // default does nothing
+        }
+
+        protected List<Record> limitReturnedRecords(List<Record> records)
+        {
+            return records;
         }
     }
 
@@ -163,20 +238,104 @@ public class TestKinesisReader
     @Test
     public void testSingleShardNoOffsetsTrimHorizon() throws Exception
     {
-        KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_1);
+        KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_1)
+        {
+            @Override
+            protected void assertShardIteratorRequest(GetShardIteratorRequest request)
+            {
+                assertEquals("request iterator type", ShardIteratorType.TRIM_HORIZON, ShardIteratorType.fromValue(request.getShardIteratorType()));
+            }
+        };
+
         KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME, ShardIteratorType.TRIM_HORIZON);
 
-        List<String> retrievedRecords = new ArrayList<String>();
-        for (Record record : reader)
-        {
-            byte[] recordData = BinaryUtils.copyAllBytesFrom(record.getData());
-            retrievedRecords.add(new String(recordData, "UTF-8"));
-            assertEquals("offsets have been updated",
-                         record.getSequenceNumber(),
-                         reader.getOffsets().get(extractShardIdFromSeqnum(record.getSequenceNumber())));
-        }
+        assertEquals("retrieved records", RECORDS_1, retrieveRecords(reader));
+        assertNull("at end of stream, iterator is null", getShardIterators(reader).get(formatShardId(0)));
+    }
 
-        assertEquals("retrieved records", RECORDS_1, retrievedRecords);
+
+    @Test
+    public void testSingleShardNoOffsetsLatest() throws Exception
+    {
+        KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_1)
+        {
+            @Override
+            protected void assertShardIteratorRequest(GetShardIteratorRequest request)
+            {
+                assertEquals("request iterator type", ShardIteratorType.LATEST, ShardIteratorType.fromValue(request.getShardIteratorType()));
+            }
+        };
+
+        KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME, ShardIteratorType.LATEST);
+
+        assertEquals("retrieved records", Collections.emptyList(), retrieveRecords(reader));
+        assertNull("at end of stream, iterator is null", getShardIterators(reader).get(formatShardId(0)));
+    }
+
+
+    @Test
+    public void testSingleShardWithOffsets() throws Exception
+    {
+        KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_1)
+        {
+            @Override
+            protected void assertShardIteratorRequest(GetShardIteratorRequest request)
+            {
+                assertEquals("request iterator type", ShardIteratorType.AFTER_SEQUENCE_NUMBER, ShardIteratorType.fromValue(request.getShardIteratorType()));
+            }
+        };
+
+        Map<String,String> offsets = new HashMap<String,String>();
+        offsets.put(formatShardId(0), formatSequenceNumber(formatShardId(0), 0));
+        KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME, offsets);
+
+        assertEquals("retrieved records",
+                     RECORDS_1.subList(1, RECORDS_1.size()),
+                     retrieveRecords(reader));
+
+        assertNull("at end of stream, iterator is null", getShardIterators(reader).get(formatShardId(0)));
+    }
+
+    @Test
+    public void testSingleShardRepeatedRead() throws Exception
+    {
+        KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_1)
+        {
+            @Override
+            protected List<Record> limitReturnedRecords(List<Record> records)
+            {
+                if (records.size() > 2)
+                    records = records.subList(0, 2);
+                return records;
+            }
+
+        };
+
+        KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME, ShardIteratorType.TRIM_HORIZON);
+
+        assertEquals("first read",
+                     RECORDS_1.subList(0, 2),
+                     retrieveRecords(reader));
+        assertEquals("after first read, iterator has been updated",
+                     formatSequenceNumber(formatShardId(0), 1),
+                     getShardIterators(reader).get(formatShardId(0)));
+
+        assertEquals("second read",
+                     RECORDS_1.subList(2, RECORDS_1.size()),
+                     retrieveRecords(reader));
+        assertNull("at end of stream, iterator is null", getShardIterators(reader).get(formatShardId(0)));
+    }
+
+
+    @Test
+    public void testSingleShardOnceAtEndOfStreamDoesNotRepeat() throws Exception
+    {
+        KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_1);
+
+        KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME, ShardIteratorType.TRIM_HORIZON);
+
+        assertEquals("records from first read",     RECORDS_1,               retrieveRecords(reader));
+        assertEquals("records from second read",    Collections.emptyList(), retrieveRecords(reader));
     }
 
 
@@ -186,16 +345,31 @@ public class TestKinesisReader
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_1, RECORDS_2);
         KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME, ShardIteratorType.TRIM_HORIZON);
 
-        List<String> retrievedRecords = new ArrayList<String>();
-        for (Record record : reader)
-        {
-            byte[] recordData = BinaryUtils.copyAllBytesFrom(record.getData());
-            retrievedRecords.add(new String(recordData, "UTF-8"));
-            assertEquals("offsets have been updated",
-                         record.getSequenceNumber(),
-                         reader.getOffsets().get(extractShardIdFromSeqnum(record.getSequenceNumber())));
-        }
+        assertEquals("retrieved records",
+                     CollectionUtil.combine(new ArrayList<String>(), RECORDS_1, RECORDS_2),
+                     retrieveRecords(reader));
 
-        assertEquals("retrieved records", CollectionUtil.combine(new ArrayList<String>(), RECORDS_1, RECORDS_2), retrievedRecords);
+        assertNull("at end of streams, shard 0 iterator is null", getShardIterators(reader).get(formatShardId(0)));
+        assertNull("at end of streams, shard 1 iterator is null", getShardIterators(reader).get(formatShardId(1)));
+    }
+
+
+    @Test
+    public void testMultipleShardsWithOffsets() throws Exception
+    {
+        KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_1, RECORDS_2);
+
+        Map<String,String> offsets = new HashMap<String,String>();
+        offsets.put(formatShardId(0), formatSequenceNumber(formatShardId(0), 0));
+        offsets.put(formatShardId(1), formatSequenceNumber(formatShardId(1), 0));
+        KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME, offsets);
+
+        assertEquals("retrieved records",
+                     CollectionUtil.combine(new ArrayList<String>(), RECORDS_1.subList(1, RECORDS_1.size()),
+                                                                     RECORDS_2.subList(1, RECORDS_2.size())),
+                     retrieveRecords(reader));
+
+        assertNull("at end of streams, shard 0 iterator is null", getShardIterators(reader).get(formatShardId(0)));
+        assertNull("at end of streams, shard 1 iterator is null", getShardIterators(reader).get(formatShardId(1)));
     }
 }
