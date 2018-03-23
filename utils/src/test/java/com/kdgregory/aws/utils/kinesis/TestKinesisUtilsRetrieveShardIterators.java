@@ -412,6 +412,88 @@ public class TestKinesisUtilsRetrieveShardIterators
 
 
     @Test
+    public void testOffsetsAtEndOfParent() throws Exception
+    {
+        shard001.getSequenceNumberRange().setEndingSequenceNumber(SHARD001_END);
+        shard002.setParentShardId(SHARD001_ID);
+
+        Map<String,String> offsets = new HashMap<String,String>();
+        offsets.put(SHARD001_ID, SHARD001_END);
+
+        KinesisClientMock mock = new KinesisClientMock("example", shard001, shard002)
+        {
+            @Override
+            protected String getShardIterator0(GetShardIteratorRequest request)
+            {
+                if (request.getShardId().equals(SHARD001_ID))
+                {
+                    fail("shard 001 should not have been queried");
+                }
+                if (request.getShardId().equals(SHARD002_ID))
+                {
+                    assertEquals("shard 002 iterator type", ShardIteratorType.TRIM_HORIZON.toString(), request.getShardIteratorType());
+                }
+                return super.getShardIterator0(request);
+            }
+        };
+        AmazonKinesis client = mock.getInstance();
+
+        Map<String,String> iterators = KinesisUtils.retrieveShardIterators(client, "example", offsets, ShardIteratorType.LATEST, 1000L);
+
+        assertEquals("invocation count, describeStream",    1, mock.describeInvocationCount.get());
+        assertEquals("invocation count, getShardIterator",  1, mock.retrieveInvocationCount.get());
+        assertEquals("size of returned map",                1, iterators.size());
+        assertNull("did not retrieve iterator for shard 1", iterators.get(SHARD001_ID));
+        assertNotEmpty("retrieved iterator for shard 2",    iterators.get(SHARD002_ID));
+    }
+
+
+    @Test
+    public void testOffsetsAtEndOfParentAndChild() throws Exception
+    {
+        shard001.getSequenceNumberRange().setEndingSequenceNumber(SHARD001_END);
+        shard002.setParentShardId(SHARD001_ID);
+        shard002.getSequenceNumberRange().setEndingSequenceNumber(SHARD002_END);
+        shard003.setParentShardId(SHARD002_ID);
+
+        Map<String,String> offsets = new HashMap<String,String>();
+        offsets.put(SHARD001_ID, SHARD001_END);
+        offsets.put(SHARD002_ID, SHARD002_END);
+
+        KinesisClientMock mock = new KinesisClientMock("example", shard001, shard002, shard003)
+        {
+            @Override
+            protected String getShardIterator0(GetShardIteratorRequest request)
+            {
+                if (request.getShardId().equals(SHARD001_ID))
+                {
+                    fail("shard 001 should not have been queried");
+                }
+                if (request.getShardId().equals(SHARD002_ID))
+                {
+                    fail("shard 002 should not have been queried");
+                }
+                if (request.getShardId().equals(SHARD003_ID))
+                {
+                    assertEquals("shard 003 iterator type", ShardIteratorType.TRIM_HORIZON.toString(), request.getShardIteratorType());
+                }
+                return super.getShardIterator0(request);
+            }
+        };
+        AmazonKinesis client = mock.getInstance();
+
+        Map<String,String> iterators = KinesisUtils.retrieveShardIterators(client, "example", offsets, ShardIteratorType.LATEST, 1000L);
+
+        assertEquals("invocation count, describeStream",    1, mock.describeInvocationCount.get());
+        assertEquals("invocation count, getShardIterator",  1, mock.retrieveInvocationCount.get());
+        assertEquals("size of returned map",                1, iterators.size());
+        assertNull("did not retrieve iterator for shard 1", iterators.get(SHARD001_ID));
+        assertNull("did not retrieve iterator for shard 2", iterators.get(SHARD002_ID));
+        assertNotEmpty("retrieved iterator for shard 3",    iterators.get(SHARD003_ID));
+    }
+
+
+    @Test
     public void testParentClosedOneChildHasOffsetsOneDoesnt() throws Exception
     {
         shard001.getSequenceNumberRange().setEndingSequenceNumber(SHARD001_END);

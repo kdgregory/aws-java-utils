@@ -575,7 +575,6 @@ public class KinesisUtils
             }
         }
 
-
         Map<String,ShardIteratorType> result = new HashMap<String,ShardIteratorType>();
         if (shardsWithSeqnum.isEmpty() && (defaultType == ShardIteratorType.TRIM_HORIZON))
         {
@@ -599,6 +598,7 @@ public class KinesisUtils
             {
                 if (! identifyDescendentOffsets(shardId, shardsById, childrenByParentId, seqnums, result))
                 {
+
                     result.put(shardId, ShardIteratorType.TRIM_HORIZON);
                 }
             }
@@ -643,28 +643,37 @@ public class KinesisUtils
             }
         }
 
-        if (childrenInResults.size() == 0)
-        {
-            // no children have offsets, we'll defer to parent
-            return false;
-        }
-
         if (childIds.size() == childrenInResults.size())
         {
             // all children accounted-for, we're done here
             return true;
         }
 
-        // some children have offsets so we'll give TRIM_HORIZON to the others
-        for (String childId : childIds)
+        if (childrenInResults.size() > 0)
         {
-            if (! childrenInResults.contains(childId))
+            // some children have offsets so we'll give TRIM_HORIZON to the others
+            for (String childId : childIds)
+            {
+                if (! childrenInResults.contains(childId))
+                {
+                    result.put(childId, ShardIteratorType.TRIM_HORIZON);
+                }
+            }
+            return true;
+        }
+
+        if ((mySeqnum != null) && (mySeqnum.equals(myEndingSeqnum)))
+        {
+            // if this shard is at the end we want to start with its children
+            for (String childId : childIds)
             {
                 result.put(childId, ShardIteratorType.TRIM_HORIZON);
             }
+            return true;
         }
 
-        return true;
+        // nothing applied here, let the parent decide
+        return false;
     }
 
 }
