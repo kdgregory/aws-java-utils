@@ -16,13 +16,10 @@ package com.kdgregory.aws.utils.kinesis;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.model.*;
@@ -347,8 +344,9 @@ public class KinesisUtils
 
 
     /**
-     *  Retrieves a single shard iterator, where the caller knows what type
-     *  of iterator to retrieve.
+     *  Retrieves a single shard iterator, retrying until a caller-specified timeout.
+     *  This function provides arguments for multiple iterator types; pass null for
+     *  those arguments that don't apply to your call.
      *
      *  @param  client          The AWS client used to make requests.
      *  @param  streamName      The name of the stream.
@@ -409,94 +407,11 @@ public class KinesisUtils
 
 
     /**
-     *  Retrieves shard iterators for the specified stream. The goal of this
-     *  function is to allow uninterrupted reading of a stream based on saved
-     *  sequence numbers. To do this it uses the following rules to determine
-     *  which of a stream's shards to return, and what type of iterator to
-     *  return for them:
-     *
-     *  <ul>
-     *  <li> If a shard is in the sequence map and the saved sequence number
-     *       is less than the ending sequence number of the shard, returns an
-     *       <code>AFTER_SEQUENCE_NUMBER</code> iterator based on the saved
-     *       sequence number. This is the normal case for working with saved
-     *       sequence numbers.
-     *  <li> If a shard is in the sequence map but the saved sequence number
-     *       equals the ending sequence number of the shard, returns a
-     *       <code>TRIM_HORIZON</code> iterator. This handles the case where
-     *       a shard is split: the program would normally consume the entire
-     *       shard and then reload iterators.
-     *  <li> If there are saved offsets for any siblings of a shard, returns
-     *       a <code>TRIM_HORIZON</code> for that shard. This handles the
-     *       case where a shard is split and the program only reads (and saves
-     *       offsets from) one of the children.
-     *  <li> If there are no offsets for any of the current shards, returns
-     *       the default iterator type. This handles the case of starting a
-     *       new reader.
-     *  </ul>
-     *
-     *  To start reading a stream from its beginning, supply an empty map and
-     *  a default iterator type of <code>TRIM_HORIZON</code>. To start reading
-     *  a stream from its end, supply an empty map and a default iterator type
-     *  <code>LATEST</code>.
-     *
-     *  @param  client      The AWS client used to make requests.
-     *  @param  streamName  The name of the stream.
-     *  @param  seqnums     A map associating shard ID with the sequence number
-     *                      of the last record read from that shard. May be
-     *                      null, in which case default iterators are retrieved
-     *                      for all shards in the stream.
-     *  @param  defaultType Specifies the default iterator type to use when the
-     *                      shard is newly discovered.
-     *  @param  timeout     Maximum number of milliseconds to spend trying to
-     *                      retrieve iterators.
-     *
-     *  @return A map associating each shard ID with an iterator for that shard.
-     *          Will be null if the stream does not exist or the timeout expired.
-     */
-    public static Map<String,String> retrieveShardIterators(
-        AmazonKinesis client, String streamName,
-        Map<String,String> seqnums, ShardIteratorType defaultType,
-        long timeout)
-    {
-        long timeoutAt = System.currentTimeMillis() + timeout;
-
-        // this handles the case where the user gives us a null map
-        if (seqnums == null) seqnums = Collections.emptyMap();
-
-        List<Shard> shards = describeShards(client, streamName, timeout);
-        if (shards == null) return null;
-
-        Map<String,ShardIteratorType> iteratorTypes = identifyIterators(shards, seqnums, defaultType);
-        Map<String,String> result = new HashMap<String,String>();
-        for (Shard shard : shards)
-        {
-            String shardId = shard.getShardId();
-            ShardIteratorType retrieveType = iteratorTypes.get(shard.getShardId());
-            if (retrieveType == null)
-                continue;
-
-            long requestTimeout = timeoutAt - System.currentTimeMillis();
-            if (requestTimeout < 0)
-                return null;
-
-            String shardIterator = retrieveShardIterator(client, streamName, shardId, retrieveType, seqnums.get(shardId), null, requestTimeout);
-            if (shardIterator == null)
-                return null;
-
-            result.put(shardId, shardIterator);
-        }
-
-        return result;
-    }
-
-
-    /**
      *  A utility function that transforms a list of shards into a map of
      *  shards keyed by the shard ID. This is used internally and may be
      *  generally useful.
      */
-    public static Map<String,Shard> getShardsById(Collection<Shard> shards)
+    public static Map<String,Shard> toMapById(Collection<Shard> shards)
     {
         Map<String,Shard> result = new HashMap<String,Shard>();
         for (Shard shard : shards)
@@ -508,172 +423,23 @@ public class KinesisUtils
 
 
     /**
-     *  A utility function that finds all children of a given shard. This is
-     *  used internally and may be generally useful. Returns an empty list
-     *  if there are no parents for the specified shard.
+     *  A utility function that transforms a list of shards into a map of
+     *  shards keyed by their parent ID. This is used internally and may
+     *  be generally useful.
      */
-    public static List<Shard> getChildren(String parentId, Map<String,Shard> shardsById)
+    public static Map<String,List<Shard>> toMapByParentId(Collection<Shard> shards)
     {
-        List<Shard> result = new ArrayList<Shard>();
-        for (Shard shard : shardsById.values())
+        Map<String,List<Shard>> result = new HashMap<String,List<Shard>>();
+        for (Shard shard : shards)
         {
-            if (parentId.equals(shard.getParentShardId()))
-                result.add(shard);
+            List<Shard> children = result.get(shard.getParentShardId());
+            if (children == null)
+            {
+                children = new ArrayList<Shard>();
+                result.put(shard.getParentShardId(), children);
+            }
+            children.add(shard);
         }
         return result;
     }
-
-//----------------------------------------------------------------------------
-//  Internals
-//----------------------------------------------------------------------------
-
-    /**
-     *  Identifies which of the shards in the stream should be active, and
-     *  returns the iterator types that apply to them.
-     */
-    private static Map<String,ShardIteratorType> identifyIterators(
-        Collection<Shard> shards, Map<String,String> seqnums, ShardIteratorType defaultType)
-    {
-        Map<String,Shard> shardsById = new HashMap<String,Shard>();
-        Map<String,Set<String>> childrenByParentId = new HashMap<String,Set<String>>();
-        Set<String> shardsWithSeqnum = new HashSet<String>();
-
-        for (Shard shard : shards)
-        {
-            String shardId = shard.getShardId();
-            shardsById.put(shardId, shard);
-            if (seqnums.containsKey(shardId))
-            {
-                shardsWithSeqnum.add(shardId);
-            }
-            String parentId = shard.getParentShardId();
-            if (shardsById.containsKey(parentId))
-            {
-                Set<String> siblings = childrenByParentId.get(parentId);
-                if (siblings == null)
-                {
-                    siblings = new HashSet<String>();
-                    childrenByParentId.put(parentId, siblings);
-                }
-                siblings.add(shardId);
-            }
-        }
-
-        Set<String> ultimateParents = new HashSet<String>();
-        Set<String> ultimateDescendents = new HashSet<String>();
-        for (Shard shard : shards)
-        {
-            String shardId = shard.getShardId();
-            String parentId = shard.getParentShardId();
-            if (! shardsById.containsKey(parentId))
-            {
-                ultimateParents.add(shardId);
-            }
-            if (childrenByParentId.get(shardId) == null)
-            {
-                ultimateDescendents.add(shardId);
-            }
-        }
-
-        Map<String,ShardIteratorType> result = new HashMap<String,ShardIteratorType>();
-        if (shardsWithSeqnum.isEmpty() && (defaultType == ShardIteratorType.TRIM_HORIZON))
-        {
-            for (String shardId : ultimateParents)
-            {
-                result.put(shardId, ShardIteratorType.TRIM_HORIZON);
-            }
-        }
-        else if (shardsWithSeqnum.isEmpty())
-        {
-            for (String shardId : ultimateDescendents)
-            {
-                result.put(shardId, ShardIteratorType.LATEST);
-            }
-        }
-        else
-        {
-            // we have some (maybe all) offsets, so will return AFTER iterators for those
-            // shards with offsets, and TRIM_HORIZON for their siblings without
-            for (String shardId : ultimateParents)
-            {
-                if (! identifyDescendentOffsets(shardId, shardsById, childrenByParentId, seqnums, result))
-                {
-
-                    result.put(shardId, ShardIteratorType.TRIM_HORIZON);
-                }
-            }
-        }
-
-        return result;
-    }
-
-
-    /**
-     *  Recursively walks the tree of shards to figure out what types of iterators apply.
-     *  If any node has offsets, then its non-offsetted siblings will get TRIM_HORIZON.
-     *  If any descendent has offsets, its direct ancestors are omitted.
-     */
-    private static boolean identifyDescendentOffsets(
-        String shardId, Map<String,Shard> shardsById, Map<String,Set<String>> childrenByParentId,
-         Map<String,String> seqnums, Map<String,ShardIteratorType> result)
-    {
-        String mySeqnum = seqnums.get(shardId);
-        String myEndingSeqnum = shardsById.get(shardId).getSequenceNumberRange().getEndingSequenceNumber();
-        if ((mySeqnum != null) && (! mySeqnum.equals(myEndingSeqnum)))
-        {
-            // if this node has a valid sequence number we don't have to look further
-            result.put(shardId, ShardIteratorType.AFTER_SEQUENCE_NUMBER);
-            return true;
-        }
-
-        Set<String> childIds = childrenByParentId.get(shardId);
-
-        if (childIds == null)
-        {
-            // if this is an ultimate descendent then we let the parent determine our sequence number
-            return false;
-        }
-
-        Set<String> childrenInResults = new HashSet<String>();
-        for (String childId : childIds)
-        {
-            if (identifyDescendentOffsets(childId, shardsById, childrenByParentId, seqnums, result))
-            {
-                childrenInResults.add(childId);
-            }
-        }
-
-        if (childIds.size() == childrenInResults.size())
-        {
-            // all children accounted-for, we're done here
-            return true;
-        }
-
-        if (childrenInResults.size() > 0)
-        {
-            // some children have offsets so we'll give TRIM_HORIZON to the others
-            for (String childId : childIds)
-            {
-                if (! childrenInResults.contains(childId))
-                {
-                    result.put(childId, ShardIteratorType.TRIM_HORIZON);
-                }
-            }
-            return true;
-        }
-
-        if ((mySeqnum != null) && (mySeqnum.equals(myEndingSeqnum)))
-        {
-            // if this shard is at the end we want to start with its children
-            for (String childId : childIds)
-            {
-                result.put(childId, ShardIteratorType.TRIM_HORIZON);
-            }
-            return true;
-        }
-
-        // nothing applied here, let the parent decide
-        return false;
-    }
-
 }

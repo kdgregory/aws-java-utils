@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.Test;
@@ -832,4 +833,28 @@ public class TestKinesisUtils
         long elapsed = System.currentTimeMillis() - start;
         assertApproximate("elapsed time", 300, elapsed, 10);
     }
+
+
+    @Test
+    public void testMapConversions() throws Exception
+    {
+        Shard shard1 = new Shard().withShardId("shard-0001");
+        Shard shard2 = new Shard().withShardId("shard-0002");
+        Shard shard3 = new Shard().withShardId("shard-0003").withParentShardId("shard-0001");
+        Shard shard4 = new Shard().withShardId("shard-0004").withParentShardId("shard-0001");
+        List<Shard> allShards = Arrays.asList(shard1, shard2, shard3, shard4);
+
+        Map<String,Shard> shardsById = KinesisUtils.toMapById(allShards);
+        assertEquals("shard map size", 4, shardsById.size());
+        for (Shard shard : allShards)
+        {
+            assertSame("shard map contains " + shard.getShardId(), shard, shardsById.get(shard.getShardId()));
+        }
+
+        Map<String,List<Shard>> shardsByParent = KinesisUtils.toMapByParentId(allShards);
+        assertEquals("parent map size", 2, shardsByParent.size());
+        assertEquals("ultimate parents",  Arrays.asList(shard1, shard2), shardsByParent.get(null));
+        assertEquals("expected children", Arrays.asList(shard3, shard4), shardsByParent.get(shard1.getShardId()));
+    }
+
 }

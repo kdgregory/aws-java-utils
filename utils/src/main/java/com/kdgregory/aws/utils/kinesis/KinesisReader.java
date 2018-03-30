@@ -14,10 +14,15 @@
 
 package com.kdgregory.aws.utils.kinesis;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.TreeMap;
 
 import com.amazonaws.services.kinesis.AmazonKinesis;
@@ -26,26 +31,40 @@ import com.amazonaws.services.kinesis.model.*;
 
 /**
  *  An instantiable class that represents a Kinesis stream as an iterable: each
- *  call to {@link #iterator} returns an iteration over the unread messages in
- *  all active shards in the stream. Where this behavior departs from what you
- *  might expect is that you can iterate the stream again, which will pick up
- *  messages added since the last iteration.
- *  <p>
- *  You construct the reader in one of two ways: either with a default iterator
- *  type or a map of offsets by shard. The first is intended for when you first
- *  start reading the stream: specify <code>TRIM_HORIZON</code> to start with
- *  the oldest records in the stream, <code>LATEST</code> to start with the newest.
- *  The latter supports continued reading from the stream, after calling {@link
- *  #getOffsets}.
+ *  call to {@link #iterator} returns an iteration over unread messages in the
+ *  stream. Its behavior departs from a "normal" <code>Iterable</code> in that
+ *  each returned iterator only makes a single pass over the shards: to read
+ *  the entire stream, you must make multiple calls to {@link #iterator}. This
+ *  behavior provides the caller the opportunity to sleep (to avoid throttling)
+ *  and also to save sequence numbers in order to continue reading later.
  *  <p>
  *  Example:
  *  <pre>
  *  </pre>
  *  <p>
- *  Within a shard, records will be returned in order. However, shards will be
- *  read in arbitrary order, so there is not guarantee of total record ordering
- *  (Kinesis cannot make that guarantee anyway, due to distribution and resend
- *  of incoming records).
+ *  You construct the iterator by providing a map of sequence numbers by shard
+ *  and a default iterator type. These are used to retrieve shard iterators
+ *  according to the following rules:
+ *  <ul>
+ *  <li> If no offsets are provided, use the specified default iterator type
+ *       for all "ultimate parent" shards (those that do not have parents in
+ *       the list of shards). This is the normal case for starting to read a
+ *       stream.
+ *  <li> For each shard that has a sequence number in the map, create
+ *       an <code>AFTER_SEQUENCE_NUMBER</code> iterator. This is the normal case
+ *       for continuing to read the stream.
+ *  <li> For the siblings of shards that have sequence numbers, but which do
+ *       not themselves have sequence numbers, use the default iterator type.
+ *       This covers the corner case where you start to read a stream but do
+ *       not process all shards.
+ *  <li> Ignore any shards that have children with saved sequence numbers. This
+ *       handles the case where you do not purge old shards when saving offsets.
+ *  </ul>
+ *  <p>
+ *  Within a shard, records are returned in order. However, shards are read in
+ *  arbitrary order, so there is not guarantee of total record ordering (Kinesis
+ *  cannot make that guarantee anyway, due to distribution and resend of incoming
+ *  records).
  *  <p>
  *  Due to the way that Kinesis stores records, any particular iteration may
  *  not return anything. This is particularly noticeable when you're at the
@@ -70,62 +89,49 @@ implements Iterable<Record>
     private AmazonKinesis client;
     private String streamName;
     private ShardIteratorType defaultIteratorType;
+    private long timeout;
 
-    // TODO - make this a configurable option
-    private long timeout = 5000;
-
+    // these two maps drive our operation
     // while the javadoc says that shards are iterated in an arbitrary order, I
     // want a known order for testing; thus the internal maps are TreeMaps
     private Map<String,String> offsets = new TreeMap<String,String>();
-    private Map<String,String> shardIterators = new TreeMap<String,String>();
+    private Map<String,String> shardIterators;
 
 
-    /**
-     *  Creates an instance that starts reading from either the oldest or newest
-     *  records in the stream, depending on <code>iteratorType</code>.
-     *
-     *  @param client               Used to access Kinesis. Client configuration
-     *                              determines the region containing the stream.
-     *  @param streamName           The stream to read.
-     *  @param defaultIteratorType  Pass either <code>TRIM_HORIZON</code>, to start reading
-     *                              the oldest records in the stream, or <code>LATEST</code>,
-     *                              to start reading at the newest.
-     */
-    public KinesisReader(AmazonKinesis client, String streamName, ShardIteratorType iteratorType)
-    {
-        this.client = client;
-        this.streamName = streamName;
-        this.defaultIteratorType = iteratorType;
-    }
-
+//----------------------------------------------------------------------------
+//  Public API
+//----------------------------------------------------------------------------
 
     /**
-     *  Creates an instance that starts reading from specific positions provided in
-     *  the offsets map. If a shard does not have offsets in the map, we start with
-     *  the oldest records in the shard (iterator type <code>TRIM_HORIZON</code>).
-     *
-     *  @param client               Used to access Kinesis. Client configuration
+     *  @param  client              Used to access Kinesis. Client configuration
      *                              determines the region containing the stream.
-     *  @param streamName           The stream to read.
-     *  @param offsets              A mapping of shard ID to the sequence number of the
+     *  @param  streamName          The stream to read.
+     *  @param  offsets             A mapping of shard ID to the sequence number of the
      *                              most recent record read from that shard. The reader
      *                              will create an <code>AFTER_SEQUENCE_NUMBER</code>
      *                              iterator to read the shard.
+     *  @param  defaultIteratorType The iterator type (<code>TRIM_HORIZON</code> or
+     *                              <code>LATEST</code>) to use for shards that do not
+     *                              have offsets in the map.
+     *  @param  timeout             The number of milliseconds to attempt reads (including
+     *                              shard iterators) before throwing.
      */
-    public KinesisReader(AmazonKinesis client, String streamName, Map<String,String> offsets)
+    public KinesisReader(
+        AmazonKinesis client, String streamName, Map<String,String> offsets,
+        ShardIteratorType defaultIteratorType, long timeout)
     {
         this.client = client;
         this.streamName = streamName;
-        this.defaultIteratorType = ShardIteratorType.TRIM_HORIZON;
+        this.defaultIteratorType = defaultIteratorType;
+        this.timeout = timeout;
         this.offsets.putAll(offsets);
     }
 
 
     /**
-     *  Returns an iterator that reads all current shards in the stream. Depending on the
-     *  iterator type, these shards may be open or closed. Shards are read in sequence by
-     *  shard ID. Each iterator makes a single pass through the shards, at which point the
-     *  calling application should sleep to avoid throttling errors.
+     *  Returns an iterator that reads all current shards in the stream. Each iterator
+     *  makes a single pass through the shards, at which point the calling application
+     *  should sleep to avoid throttling errors.
      */
     @Override
     public Iterator<Record> iterator()
@@ -139,14 +145,16 @@ implements Iterable<Record>
      *  be saved and used to initialize a new reader. The returned map is a copy of the
      *  current reader offsets; the caller may do with it whatever they want.
      *  <p>
-     *  Note: this map does not purge closed shards; if you frequently re-shard your stream
-     *  it can grow quite large.
+     *  Note: this map may contain offsets for both parent and child shards.
      */
     public Map<String,String> getOffsets()
     {
         return new TreeMap<String,String>(offsets);
     }
 
+//----------------------------------------------------------------------------
+//  Internals
+//----------------------------------------------------------------------------
 
     /**
      *  Each instance of this iterator will make a single pass through the active shards,
@@ -175,7 +183,8 @@ implements Iterable<Record>
 
 
         /**
-         *  Returns the next record from the stream.
+         *  Returns the next record from the stream. Note that records read from
+         *  different shards may not be read in the order they were written.
          */
         @Override
         public Record next()
@@ -198,13 +207,19 @@ implements Iterable<Record>
             throw new UnsupportedOperationException("Kinesis streams are immutable");
         }
 
-        // internals
+        //---------------------------------------------------------------------
 
         private void findNextShardWithRecords()
         {
+            // this happens when the reader is first constructed
+            if (shardIterators == null)
+            {
+                retrieveInitialIterators();
+            }
+
+            // this happens on the first call for each new iterator
             if (shardIds == null)
             {
-                shardIterators.putAll(KinesisUtils.retrieveShardIterators(client, streamName, offsets, defaultIteratorType, timeout));
                 shardIds = new LinkedList<String>(shardIterators.keySet());
             }
 
@@ -216,15 +231,183 @@ implements Iterable<Record>
         }
 
 
+        /**
+         *  Retrieves the initial shard iterators, using either the supplied offsets or the
+         *  default iterator type. This will be called on the first iteration, as well as
+         *  any time that we have expired iterators.
+         */
+        private void retrieveInitialIterators()
+        {
+            shardIterators = new ShardIteratorManager(client, streamName, offsets, defaultIteratorType, timeout)
+                             .retrieveInitialIterators();
+        }
+
+
+        /**
+         *  Called when we reach the end of a shard, to replace the parent shard iterator
+         *  with TRIM_HORIZON iterators for each of its children.
+         */
+        private void retrieveChildIterators(String parentShardId)
+        {
+            shardIterators.remove(parentShardId);
+            shardIterators.putAll(new ShardIteratorManager(client, streamName, offsets, defaultIteratorType, timeout)
+                                  .retrieveChildIterators(parentShardId));
+        }
+
+
         private void readCurrentShard()
         {
             String shardItx = shardIterators.get(currentShardId);
-            // TODO - return if iterator is null (happens at end of shard)
+
             // TODO - handle exceptions
             GetRecordsResult response = client.getRecords(new GetRecordsRequest().withShardIterator(shardItx));
-            shardIterators.put(currentShardId, response.getNextShardIterator());
-            // TODO - track millis behind latest
             currentRecords.addAll(response.getRecords());
+            // TODO - track millis behind latest
+
+            String nextShardIterator = response.getNextShardIterator();
+            shardIterators.put(currentShardId, nextShardIterator);
+            if (nextShardIterator == null)
+            {
+                retrieveChildIterators(currentShardId);
+            }
+        }
+    }
+
+
+    /**
+     *  This class encapsulates shard iterator retrieval, allowing for independent
+     *  unit tests.
+     */
+    protected static class ShardIteratorManager
+    {
+        private AmazonKinesis client;
+        private String streamName;
+        private Map<String,String> initialOffsets;
+        private ShardIteratorType defaultIteratorType;
+        private long timeout;
+
+        private List<Shard> shards;
+        private Map<String,List<Shard>> shardsByParentId;
+
+        public ShardIteratorManager(
+            AmazonKinesis client, String streamName, Map<String,String> initialOffsets, ShardIteratorType defaultIteratorType, long timeout)
+        {
+            this.client = client;
+            this.streamName = streamName;
+            this.initialOffsets = initialOffsets;
+            this.defaultIteratorType = defaultIteratorType;
+            this.timeout = timeout;
+        }
+
+        public Map<String,String> retrieveInitialIterators()
+        {
+            long timeoutAt = System.currentTimeMillis() + timeout;
+            describeShards();
+
+            Map<String,ShardIteratorType> itxTypes = new HashMap<String,ShardIteratorType>();
+            if (! constructMixedIteratorTree(shardsByParentId.get(null), itxTypes))
+            {
+                if (defaultIteratorType == ShardIteratorType.TRIM_HORIZON)
+                {
+                    for (Shard shard : shardsByParentId.get(null))
+                    {
+                        itxTypes.put(shard.getShardId(), defaultIteratorType);
+                    }
+                }
+                else
+                {
+                    for (Shard shard : shards)
+                    {
+                        if (shardsByParentId.get(shard.getShardId()) == null)
+                        {
+                            itxTypes.put(shard.getShardId(), ShardIteratorType.LATEST);
+                        }
+                    }
+                }
+            }
+
+            return retrieveIterators(itxTypes, timeoutAt);
+        }
+
+        public Map<String,String> retrieveChildIterators(String parentShardId)
+        {
+            long timeoutAt = System.currentTimeMillis() + timeout;
+            describeShards();
+
+            List<Shard> children = shardsByParentId.get(parentShardId);
+            if (children == null)
+            {
+                return Collections.emptyMap();
+            }
+
+            Map<String,ShardIteratorType> itxTypes = new TreeMap<String,ShardIteratorType>();
+            for (Shard shard : children)
+            {
+                itxTypes.put(shard.getShardId(), ShardIteratorType.TRIM_HORIZON);
+            }
+
+            return retrieveIterators(itxTypes, timeoutAt);
+        }
+
+        private void describeShards()
+        {
+            shards = KinesisUtils.describeShards(client, streamName, timeout);
+            shardsByParentId = KinesisUtils.toMapByParentId(shards);
+        }
+
+        private Map<String,String> retrieveIterators(Map<String,ShardIteratorType> iteratorTypes, long timeoutAt)
+        {
+            Map<String,String> result = new TreeMap<String,String>();
+
+            for (Map.Entry<String,ShardIteratorType> entry : iteratorTypes.entrySet())
+            {
+                String shardId = entry.getKey();
+                ShardIteratorType iteratorType = entry.getValue();
+                String offset = initialOffsets.get(shardId);
+                long currentTimeout = timeoutAt - System.currentTimeMillis();
+                // TODO - throw if < 0
+                String shardIterator = KinesisUtils.retrieveShardIterator(client, streamName, shardId, iteratorType, offset, null, currentTimeout);
+                // TODO - throw if null
+                result.put(shardId, shardIterator);
+            }
+            return result;
+        }
+
+        private boolean constructMixedIteratorTree(List<Shard> children, Map<String,ShardIteratorType> itxTypes)
+        {
+            if (children == null)
+                return false;
+
+            Set<String> childrenWithOffsets = new HashSet<String>();
+            for (Shard child : children)
+            {
+                String childShardId = child.getShardId();
+                if (constructMixedIteratorTree(shardsByParentId.get(childShardId), itxTypes))
+                {
+                    childrenWithOffsets.add(childShardId);
+                }
+                else if (initialOffsets.containsKey(childShardId))
+                {
+                    itxTypes.put(childShardId, ShardIteratorType.AFTER_SEQUENCE_NUMBER);
+                    childrenWithOffsets.add(childShardId);
+                }
+            }
+
+            if (childrenWithOffsets.size() == 0)
+                return false;
+
+            if (childrenWithOffsets.size() == children.size())
+                return true;
+
+            for (Shard child : children)
+            {
+                String childShardId = child.getShardId();
+                if (! childrenWithOffsets.contains(childShardId))
+                {
+                    itxTypes.put(childShardId, ShardIteratorType.TRIM_HORIZON);
+                }
+            }
+            return true;
         }
     }
 }
