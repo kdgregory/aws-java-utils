@@ -15,6 +15,8 @@
 package com.kdgregory.aws.utils.examples.kinesis;
 
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.AmazonKinesisClientBuilder;
@@ -26,15 +28,35 @@ import com.kdgregory.aws.utils.kinesis.KinesisReader;
 
 
 /**
- *  Reads records from the stream passed on the command-line.
+ *  Simple stream reader: reads from the end of the named stream unless provided
+ *  with offsets.
+ *  <p>
+ *  Invocation:
+ *  <pre>
+ *    java -cp target/aws-java-utils-examples-*.jar com.kdgregory.aws.utils.examples.kinesis.KinesisReaderExample STREAM_NAME [SHARD_ID SEQUENCE_NUMBER]...
+ *  </pre>
+ *  Where:
+ *  <ul>
+ *  <li> STREAM_NAME is the name of the stream
+ *  <li> SHARD_ID identifies a shard in that stream
+ *  <li> SEQUENCE_NUMBER is the last sequence number read from that shard (so this run will
+ *       start with the next record in the shard)
+ *  </ul>
  */
 public class KinesisReaderExample
 {
     public static void main(String[] argv)
     throws Exception
     {
+        String streamName = argv[0];
+        Map<String,String> offsets = new HashMap<String,String>();
+        for (int ii = 1 ; ii < argv.length ; ii += 2)
+        {
+            offsets.put(argv[ii], argv[ii+1]);
+        }
+
         AmazonKinesis client = AmazonKinesisClientBuilder.defaultClient();
-        KinesisReader reader = new KinesisReader(client, argv[0], ShardIteratorType.TRIM_HORIZON);
+        KinesisReader reader = new KinesisReader(client, streamName, offsets, ShardIteratorType.LATEST, 10000);
 
         while (true)
         {
