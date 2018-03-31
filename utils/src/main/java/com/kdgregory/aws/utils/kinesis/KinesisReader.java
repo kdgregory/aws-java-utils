@@ -31,36 +31,57 @@ import com.amazonaws.services.kinesis.model.*;
 
 /**
  *  An instantiable class that represents a Kinesis stream as an iterable: each
- *  call to {@link #iterator} returns an iteration over unread messages in the
- *  stream. Its behavior departs from a "normal" <code>Iterable</code> in that
- *  each returned iterator only makes a single pass over the shards: to read
- *  the entire stream, you must make multiple calls to {@link #iterator}. This
- *  behavior provides the caller the opportunity to sleep (to avoid throttling)
- *  and also to save sequence numbers in order to continue reading later.
+ *  call to {@link #iterator} returns an iteration over a set of unread messages
+ *  from the stream. It is intended for the use case where each consumer processes
+ *  all messages in the stream, <em>not</em> for the case where there are multiple
+ *  coordinated consumers reading the same stream.
  *  <p>
- *  Example:
- *  <pre>
- *  </pre>
+ *  Unlike a "normal" <code>Iterable</code>, the returned iterator does not read
+ *  the entire stream. Instead, it calls <code>GetRecords</code> once for each
+ *  shard in the stream, and then reports no more elements. This allows the caller
+ *  to sleep between calls (to avoid throttling), as well as providing a good spot
+ *  to retrieve and save sequence numbers.
+ *
+ *  <h1> Construction and Configuration </h1>
+ *
+ *  The sole constructor takes just two arguments: a Kinesis client object and the
+ *  name of the stream to be read. This produces a reader that starts reading at
+ *  the current end of stream. Specifically, it identifies all open shards in the
+ *  stream creates a <code>LATEST</code> shard iterator for them.
  *  <p>
- *  You construct the iterator by providing a map of sequence numbers by shard
- *  and a default iterator type. These are used to retrieve shard iterators
- *  according to the following rules:
+ *  This behavior can be altered via several configuration methods, each of which
+ *  can be chained.
+ *
+ *  <h1> Sequence Numbers </h1>
+ *
+ *  To support applications that must start and stop, the reader retains the last
+ *  sequence number read from each shard. You can retrieve the current set of
+ *  sequence numbers with {@link #getCurrentSequenceNumbers()}, and use them to
+ *  configure a new reader via {@link #withInitialSequenceNumbers(Map)}.
+ *  <p>
+ *  When you configure a reader with initial sequence numbers, that changes the
+ *  behavior of the reader:
  *  <ul>
- *  <li> If no offsets are provided, use the specified default iterator type
- *       for all "ultimate parent" shards (those that do not have parents in
- *       the list of shards). This is the normal case for starting to read a
- *       stream.
- *  <li> For each shard that has a sequence number in the map, create
- *       an <code>AFTER_SEQUENCE_NUMBER</code> iterator. This is the normal case
- *       for continuing to read the stream.
- *  <li> For the siblings of shards that have sequence numbers, but which do
- *       not themselves have sequence numbers, use the default iterator type.
- *       This covers the corner case where you start to read a stream but do
- *       not process all shards.
- *  <li> Ignore any shards that have children with saved sequence numbers. This
- *       handles the case where you do not purge old shards when saving offsets.
- *  </ul>
- *  <p>
+ *  <li> If none of the <em>current</em> shards in the stream correspond to the
+ *       saved sequence numbers, then the reader uses the default shard iterator
+ *       type. This covers the case where saved sequence numbers are long out of
+ *       date.
+ *  <li> For any shard that has a saved sequence number, <em>provided that there
+ *       are no descendent shards with saved sequence numbers,</em> the reader
+ *       creates an <code>AFTER_SEQUENCE_NUMBER</code> iterator based on the
+ *       saved sequence number.
+ *  <li> If there are saved sequence numbers for a shard and its descendents, only
+ *       the descendent sequence numbers are retained. This prevents re-reading a
+ *       shard once we've started reading its children.
+ *  <li> If there is a saved sequence number for a shard but not its sibling, then
+ *       the sibling is given a <code>TRIM_HORIZON</code> iterator. This covers
+ *       the case where a reader was interrupted before it could make a pass of all
+ *       shards.
+ *
+ *  <h1> Error Handling </h1>
+ *
+ *  <h1> General Notes </h1>
+ *
  *  Within a shard, records are returned in order. However, shards are read in
  *  arbitrary order, so there is not guarantee of total record ordering (Kinesis
  *  cannot make that guarantee anyway, due to distribution and resend of incoming
@@ -73,15 +94,14 @@ import com.amazonaws.services.kinesis.model.*;
  *  <p>
  *  To avoid throttling, the caller should sleep for an appropriate interval
  *  between creating iterators (where "appropriate" depends on the number of
- *  clients that are reading the stream simultaneously). If you do not sleep,
- *  then the iteratormay throw <code>ProvisionedThroughputExceededException</code>.
- *  The caller is expected to catch this exception (although as a runtime exception
- *  there's no way to enforce this). You can continue to use the iterator if
- *  this exception is thrown: it will attempt to re-read the same shard. But
- *  if you don't sleep before reading you'll just get another exception.
+ *  clients that are reading the stream simultaneously). As described above,
+ *  throttling exceptions may be transparently handled via retries, but the
+ *  application should not rely on this behavior.
  *  <p>
  *  Instances of this class and the iterators that they produce are <em>not</em>
  *  safe for concurrent use from multiple threads.
+ *
+ *  <h1> Example </h1>
  */
 public class KinesisReader
 implements Iterable<Record>
@@ -99,34 +119,71 @@ implements Iterable<Record>
 
 
 //----------------------------------------------------------------------------
-//  Public API
+//  Constructor and Configuration Methods
 //----------------------------------------------------------------------------
 
     /**
+     *  Constructs an instance that starts reading the stream at its current end.
+     *  Call one or more of the configuration methods to change this behavior.
+     *
      *  @param  client              Used to access Kinesis. Client configuration
      *                              determines the region containing the stream.
      *  @param  streamName          The stream to read.
-     *  @param  offsets             A mapping of shard ID to the sequence number of the
-     *                              most recent record read from that shard. The reader
-     *                              will create an <code>AFTER_SEQUENCE_NUMBER</code>
-     *                              iterator to read the shard.
-     *  @param  defaultIteratorType The iterator type (<code>TRIM_HORIZON</code> or
-     *                              <code>LATEST</code>) to use for shards that do not
-     *                              have offsets in the map.
-     *  @param  timeout             The number of milliseconds to attempt reads (including
-     *                              shard iterators) before throwing.
      */
-    public KinesisReader(
-        AmazonKinesis client, String streamName, Map<String,String> offsets,
-        ShardIteratorType defaultIteratorType, long timeout)
+    public KinesisReader(AmazonKinesis client, String streamName)
     {
         this.client = client;
         this.streamName = streamName;
-        this.defaultIteratorType = defaultIteratorType;
-        this.timeout = timeout;
+        this.timeout = 2500;
+        this.defaultIteratorType = ShardIteratorType.LATEST;
         this.offsets.putAll(offsets);
     }
 
+
+    /**
+     *  Configures the stream to start reading at the first record. Specifically,
+     *  identifies all shards that do not have parents, and creates a
+     *  <code>TRIM_HORIZON</code> iterator for them.
+     *  <p>
+     *  Note that this method has no effect if you call {@link #withInitialSequenceNumbers}
+     *  with a non-empty map.
+     */
+    public KinesisReader readFromTrimHorizon()
+    {
+        this.defaultIteratorType = ShardIteratorType.TRIM_HORIZON;
+        return this;
+    }
+
+
+    /**
+     *  Sets the initial sequence numbers for the stream's shards from the passed
+     *  map: keys are shard IDs, values are sequence numbers. If the map is empty
+     *  then this method acts as a no-op and reader behavior depends on default
+     *  iterator type.
+     */
+    public KinesisReader withInitialSequenceNumbers(Map<String,String> value)
+    {
+        this.offsets = value;
+        return this;
+    }
+
+
+    /**
+     *  Sets the timeout, in milliseconds, for Kinesis interaction. The default
+     *  value of 2500 should be sufficient for most usages, but a large number
+     *  of shards may require a higher value to avoid timing out while loading
+     *  shard iterators.
+     */
+    public KinesisReader withTimeout(long millis)
+    {
+        this.timeout = millis;
+        return this;
+    }
+
+
+//----------------------------------------------------------------------------
+//  Public API
+//----------------------------------------------------------------------------
 
     /**
      *  Returns an iterator that reads all current shards in the stream. Each iterator
@@ -144,10 +201,8 @@ implements Iterable<Record>
      *  Returns a map of the most recent sequence numbers read for each shard. This can
      *  be saved and used to initialize a new reader. The returned map is a copy of the
      *  current reader offsets; the caller may do with it whatever they want.
-     *  <p>
-     *  Note: this map may contain offsets for both parent and child shards.
      */
-    public Map<String,String> getOffsets()
+    public Map<String,String> getCurrentSequenceNumbers()
     {
         return new TreeMap<String,String>(offsets);
     }
@@ -221,6 +276,7 @@ implements Iterable<Record>
             if (shardIds == null)
             {
                 shardIds = new LinkedList<String>(shardIterators.keySet());
+                // TODO - purge offsets for any shards that aren't in this list
             }
 
             while (currentRecords.isEmpty() && (! shardIds.isEmpty()))

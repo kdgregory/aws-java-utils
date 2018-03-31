@@ -21,7 +21,6 @@ import java.util.Map;
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.AmazonKinesisClientBuilder;
 import com.amazonaws.services.kinesis.model.Record;
-import com.amazonaws.services.kinesis.model.ShardIteratorType;
 import com.amazonaws.util.BinaryUtils;
 
 import com.kdgregory.aws.utils.kinesis.KinesisReader;
@@ -56,14 +55,13 @@ public class KinesisReaderExample
         }
 
         AmazonKinesis client = AmazonKinesisClientBuilder.defaultClient();
-        KinesisReader reader = new KinesisReader(client, streamName, offsets, ShardIteratorType.LATEST, 10000);
-
+        KinesisReader reader = new KinesisReader(client, streamName).withInitialSequenceNumbers(offsets);
         while (true)
         {
             System.out.println();
             System.out.println();
             System.out.println(new Date());
-            System.out.println("Offsets: " + reader.getOffsets());
+            System.out.println("Offsets: " + reader.getCurrentSequenceNumbers());
 
             for (Record record : reader)
             {
