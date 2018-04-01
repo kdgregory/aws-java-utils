@@ -68,14 +68,9 @@ if you don't like commons-logging you need to replace it (for example, with `jcl
 if you use the SLF4J logging framework). _Unlike_ the SDK, you don't have to explicitly
 ignore the transitive dependency.
 
-This library does a moderate amount of debug-level logging, along with extensive logging of
-error conditions. You probably don't want to see the former, but should enable the latter.
-To do so with Log4J 1.x, use the following in your `log4j.properties` (adapt as needed for
-other logging frameworks):
-
-```
-log4j.logger.com.kdgregory.aws.utils=ERROR
-```
+The library makes use of two log levels: `WARN` and `DEBUG`. DEBUG is used for status from
+long-running operations or long-lived objects; WARN is used to report exceptions that are
+hidden by the library (for example, timeouts). "Real" errors are propagated, not logged. 
 
 
 ## Source Control

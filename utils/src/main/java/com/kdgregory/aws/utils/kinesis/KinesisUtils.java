@@ -21,6 +21,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.model.*;
 
@@ -34,6 +37,8 @@ import com.kdgregory.aws.utils.CommonUtils;
  */
 public class KinesisUtils
 {
+    private static Log logger = LogFactory.getLog(KinesisUtils.class);
+
     /**
      *  Extracts the status from a stream description and converts it from a string
      *  to a <code>StreamStatus</code> value. Returns null if the description is null
@@ -50,6 +55,7 @@ public class KinesisUtils
         catch (IllegalArgumentException ex)
         {
             // this should never happen with an AWS-constructed description but let's be sure
+            logger.warn("getStatus: invalid status: " + description.getStreamStatus() + " for stream: " + description.getStreamName());
             return null;
         }
     }
@@ -87,6 +93,8 @@ public class KinesisUtils
                 currentSleep *= 2;
             }
         }
+
+        logger.warn("describeStream: timeout, stream = " + request.getStreamName());
         return null;
     }
 
@@ -153,6 +161,8 @@ public class KinesisUtils
             // sleep to avoid throttling
             CommonUtils.sleepQuietly(100);
         }
+
+        logger.warn("waitForStatus: timeout, stream = " + streamName);
         return lastStatus;
     }
 
@@ -237,6 +247,8 @@ public class KinesisUtils
                 return false;
             }
         }
+
+        logger.warn("deleteStream: timeout, stream = " + streamName);
         return false;
     }
 
@@ -402,6 +414,8 @@ public class KinesisUtils
                 currentSleepTime *= 2;
             }
         }
+
+        logger.warn("retrieveShardIterator: timeout, stream = " + streamName + ", shard = " + shardId);
         return null;
     }
 

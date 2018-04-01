@@ -25,6 +25,9 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.TreeMap;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.model.*;
 
@@ -106,6 +109,8 @@ import com.amazonaws.services.kinesis.model.*;
 public class KinesisReader
 implements Iterable<Record>
 {
+    private Log logger = LogFactory.getLog(getClass());
+
     private AmazonKinesis client;
     private String streamName;
     private ShardIteratorType defaultIteratorType;
@@ -294,6 +299,10 @@ implements Iterable<Record>
          */
         private void retrieveInitialIterators()
         {
+            if (logger.isDebugEnabled())
+            {
+                logger.debug("retrieveInitialIterators: stream = " + streamName + ", offsets = " + offsets);
+            }
             shardIterators = new ShardIteratorManager(client, streamName, offsets, defaultIteratorType, timeout)
                              .retrieveInitialIterators();
         }
@@ -305,6 +314,10 @@ implements Iterable<Record>
          */
         private void retrieveChildIterators(String parentShardId)
         {
+            if (logger.isDebugEnabled())
+            {
+                logger.debug("retrieveChildIterators: stream = " + streamName + ", parent = " + parentShardId);
+            }
             shardIterators.remove(parentShardId);
             shardIterators.putAll(new ShardIteratorManager(client, streamName, offsets, defaultIteratorType, timeout)
                                   .retrieveChildIterators(parentShardId));
@@ -313,6 +326,11 @@ implements Iterable<Record>
 
         private void readCurrentShard()
         {
+            if (logger.isDebugEnabled())
+            {
+                logger.debug("readCurrentShard: stream = " + streamName + ", shard = " + currentShardId);
+            }
+
             String shardItx = shardIterators.get(currentShardId);
 
             // TODO - handle exceptions
@@ -336,6 +354,8 @@ implements Iterable<Record>
      */
     protected static class ShardIteratorManager
     {
+        private Log logger = LogFactory.getLog(getClass());
+
         private AmazonKinesis client;
         private String streamName;
         private Map<String,String> initialOffsets;
@@ -380,6 +400,11 @@ implements Iterable<Record>
                         }
                     }
                 }
+            }
+
+            if (logger.isDebugEnabled())
+            {
+                logger.debug("retrieveInitialIterators: stream = " + streamName + ", iterator types = " + itxTypes);
             }
 
             return retrieveIterators(itxTypes, timeoutAt);
