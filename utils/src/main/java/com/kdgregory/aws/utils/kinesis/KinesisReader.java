@@ -81,7 +81,21 @@ import com.amazonaws.services.kinesis.model.*;
  *       the case where a reader was interrupted before it could make a pass of all
  *       shards.
  *
- *  <h1> Error Handling </h1>
+ *  <h1> Error Handling and Timeouts </h1>
+ *
+ *  Non-recoverable errors, such as <code>ResourceNotFoundException</code> are
+ *  thrown; the caller must be prepared to handle these or let them propagate.
+ *  Recoverable errors, such as <code>ProvisionedThroughputExceededException</code>,
+ *  are logged at WARN level but otherwise ignored: no records are returned for the
+ *  affected shard.
+ *  <p>
+ *  There is no attempt to retry <code>GetRecords</code> request that are throttled;
+ *  the assumption is that the caller will sleep and then iterate again. However,
+ *  requests to retrieve shard iterators (and the stream description) are retried,
+ *  with a timeout (and logged warning) if they fail to complete within a specified
+ *  amount of time. The default timeout should be sufficient unless you have a large
+ *  number of shards and multiple applications trying to read them; in that case you
+ *  can call {@link #withTimeout} to increase the timeout as needed.
  *
  *  <h1> General Notes </h1>
  *
@@ -277,6 +291,13 @@ implements Iterable<Record>
                 retrieveInitialIterators();
             }
 
+            // this will only happen if there's a timeout retrieving iterators
+            if (shardIterators == null)
+            {
+                logger.warn("unable to retrieve shard iterators: stream = " + streamName);
+                return;
+            }
+
             // this happens on the first call for each new iterator
             if (shardIds == null)
             {
@@ -333,16 +354,26 @@ implements Iterable<Record>
 
             String shardItx = shardIterators.get(currentShardId);
 
-            // TODO - handle exceptions
-            GetRecordsResult response = client.getRecords(new GetRecordsRequest().withShardIterator(shardItx));
-            currentRecords.addAll(response.getRecords());
-            // TODO - track millis behind latest
-
-            String nextShardIterator = response.getNextShardIterator();
-            shardIterators.put(currentShardId, nextShardIterator);
-            if (nextShardIterator == null)
+            try
             {
-                retrieveChildIterators(currentShardId);
+                GetRecordsResult response = client.getRecords(new GetRecordsRequest().withShardIterator(shardItx));
+                currentRecords.addAll(response.getRecords());
+                // TODO - track millis behind latest
+
+                String nextShardIterator = response.getNextShardIterator();
+                shardIterators.put(currentShardId, nextShardIterator);
+                if (nextShardIterator == null)
+                {
+                    retrieveChildIterators(currentShardId);
+                }
+            }
+            catch (ProvisionedThroughputExceededException ex)
+            {
+                logger.warn("provisioned throughput exceeded: stream = " + streamName + ", shard = " + currentShardId);
+            }
+            catch (ExpiredIteratorException ex)
+            {
+                logger.warn("iterator expired: stream = " + streamName + ", shard = " + currentShardId);
             }
         }
     }
@@ -410,6 +441,7 @@ implements Iterable<Record>
             return retrieveIterators(itxTypes, timeoutAt);
         }
 
+
         public Map<String,String> retrieveChildIterators(String parentShardId)
         {
             long timeoutAt = System.currentTimeMillis() + timeout;
@@ -430,11 +462,13 @@ implements Iterable<Record>
             return retrieveIterators(itxTypes, timeoutAt);
         }
 
+
         private void describeShards()
         {
             shards = KinesisUtils.describeShards(client, streamName, timeout);
             shardsByParentId = KinesisUtils.toMapByParentId(shards);
         }
+
 
         private Map<String,String> retrieveIterators(Map<String,ShardIteratorType> iteratorTypes, long timeoutAt)
         {
@@ -446,13 +480,18 @@ implements Iterable<Record>
                 ShardIteratorType iteratorType = entry.getValue();
                 String offset = initialOffsets.get(shardId);
                 long currentTimeout = timeoutAt - System.currentTimeMillis();
-                // TODO - throw if < 0
+                if (currentTimeout < 0)
+                    return null;
+
                 String shardIterator = KinesisUtils.retrieveShardIterator(client, streamName, shardId, iteratorType, offset, null, currentTimeout);
-                // TODO - throw if null
+                if (currentTimeout < 0)
+                    return null;
+
                 result.put(shardId, shardIterator);
             }
             return result;
         }
+
 
         private boolean constructMixedIteratorTree(List<Shard> children, Map<String,ShardIteratorType> itxTypes)
         {

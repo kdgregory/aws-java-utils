@@ -23,9 +23,15 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
+
+import org.apache.log4j.*;
+import org.apache.log4j.spi.*;
 
 import net.sf.kdgcommons.collections.CollectionUtil;
 import net.sf.kdgcommons.lang.StringUtil;
@@ -41,6 +47,9 @@ import com.amazonaws.util.BinaryUtils;
  */
 public class TestKinesisReader
 {
+
+    private LinkedBlockingQueue<LoggingEvent> loggingEvents = new LinkedBlockingQueue<LoggingEvent>();
+
 //----------------------------------------------------------------------------
 //  Some common test parameters
 //----------------------------------------------------------------------------
@@ -61,7 +70,7 @@ public class TestKinesisReader
 
 
 //----------------------------------------------------------------------------
-//  Test Helpers
+//  Helpers
 //----------------------------------------------------------------------------
 
     private static String formatShardId(int id)
@@ -85,6 +94,25 @@ public class TestKinesisReader
     private static int extractOffsetFromSeqnum(String sequenceNumber)
     {
         return Integer.parseInt(sequenceNumber.split(",")[1]);
+    }
+
+
+    /**
+     *  Identifies all log messages that contain the specified text, and asserts
+     *  their level.
+     */
+    public void assertLogMessages(String message, String searchtext, int expectedCount, Level expectedLevel)
+    {
+        int actualCount = 0;
+        for (LoggingEvent logEvent : loggingEvents)
+        {
+            if (logEvent.getRenderedMessage().contains(searchtext))
+            {
+                assertEquals(message + ": log level", expectedLevel, logEvent.getLevel());
+                actualCount++;
+            }
+        }
+        assertEquals(message + ": number of messages", expectedCount, actualCount);
     }
 
 
@@ -192,7 +220,6 @@ public class TestKinesisReader
             return new GetShardIteratorResult().withShardIterator(formatSequenceNumber(shardId, offset));
         }
 
-        @SuppressWarnings("unused")
         public GetRecordsResult getRecords(GetRecordsRequest request)
         {
             String shardItx = request.getShardIterator();
@@ -237,6 +264,38 @@ public class TestKinesisReader
         }
     }
 
+
+
+//----------------------------------------------------------------------------
+//  Setup and teardown
+//----------------------------------------------------------------------------
+
+    @Before
+    public void setUp()
+    {
+        Logger readerLogger = Logger.getLogger(KinesisReader.class);
+        readerLogger.setLevel(Level.DEBUG);
+        readerLogger.addAppender(new AppenderSkeleton()
+        {
+            @Override
+            public void close()
+            {
+                // no-op
+            }
+
+            @Override
+            public boolean requiresLayout()
+            {
+                return false;
+            }
+
+            @Override
+            protected void append(LoggingEvent event)
+            {
+                loggingEvents.add(event);
+            }
+        });
+    }
 
 //----------------------------------------------------------------------------
 //  Testcases
@@ -668,4 +727,91 @@ public class TestKinesisReader
                      Collections.emptyList(),
                      retrieveRecords(reader));
     }
+
+
+    @Test
+    public void testThrottling() throws Exception
+    {
+        final AtomicInteger getRecordsInvocationCount = new AtomicInteger(0);
+
+        KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_1)
+        {
+            @Override
+            public GetRecordsResult getRecords(GetRecordsRequest request)
+            {
+                if ((getRecordsInvocationCount.getAndIncrement() % 2) == 0)
+                    throw new ProvisionedThroughputExceededException("testing");
+
+                return super.getRecords(request);
+            }
+        };
+
+        KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).readFromTrimHorizon();
+
+        List<String> firstRead = retrieveRecords(reader);
+        assertEquals("first read, records returned",                        Collections.emptyList(), firstRead);
+        assertEquals("after first read, number of calls to GetRecords",     1, getRecordsInvocationCount.get());
+
+        List<String> secondRead = retrieveRecords(reader);
+        assertEquals("second read, records returned",                       RECORDS_1, secondRead);
+        assertEquals("after second read, number of calls to GetRecords",    2, getRecordsInvocationCount.get());
+
+        assertLogMessages("throttling log messages", "provisioned throughput exceeded", 1, Level.WARN);
+    }
+
+
+    @Test
+    public void testExpiredIterator() throws Exception
+    {
+        final AtomicInteger getRecordsInvocationCount = new AtomicInteger(0);
+
+        KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_1)
+        {
+            @Override
+            public GetRecordsResult getRecords(GetRecordsRequest request)
+            {
+                if ((getRecordsInvocationCount.getAndIncrement() % 2) == 0)
+                    throw new ExpiredIteratorException("testing");
+
+                return super.getRecords(request);
+            }
+        };
+
+        KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).readFromTrimHorizon();
+
+        List<String> firstRead = retrieveRecords(reader);
+        assertEquals("first read, records returned",                        Collections.emptyList(), firstRead);
+        assertEquals("after first read, number of calls to GetRecords",     1, getRecordsInvocationCount.get());
+
+        List<String> secondRead = retrieveRecords(reader);
+        assertEquals("second read, records returned",                       RECORDS_1, secondRead);
+        assertEquals("after second read, number of calls to GetRecords",    2, getRecordsInvocationCount.get());
+
+        assertLogMessages("expired iterator log messages", "iterator expired", 1, Level.WARN);
+    }
+
+
+    @Test
+    public void testTimeoutRetrievingShardIterators() throws Exception
+    {
+        KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0, RECORDS_1, RECORDS_2)
+        {
+            @Override
+            public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
+            {
+                throw new ProvisionedThroughputExceededException("testing");
+            }
+        };
+
+        KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).readFromTrimHorizon().withTimeout(50);
+
+        List<String> firstRead = retrieveRecords(reader);
+        assertEquals("first read, records returned", Collections.emptyList(), firstRead);
+
+        List<String> secondRead = retrieveRecords(reader);
+        assertEquals("first read, records returned", Collections.emptyList(), secondRead);
+
+        assertLogMessages("unable to retrieve iterators log messages", "unable to retrieve shard iterators", 2, Level.WARN);
+    }
+
 }
