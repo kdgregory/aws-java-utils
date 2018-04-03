@@ -136,6 +136,9 @@ implements Iterable<Record>
     private Map<String,String> offsets = new TreeMap<String,String>();
     private Map<String,String> shardIterators;
 
+    // this will contain the maximum value across all shards
+    private long millisBehindLatest;
+
 
 //----------------------------------------------------------------------------
 //  Constructor and Configuration Methods
@@ -208,10 +211,15 @@ implements Iterable<Record>
      *  Returns an iterator that reads all current shards in the stream. Each iterator
      *  makes a single pass through the shards, at which point the calling application
      *  should sleep to avoid throttling errors.
+     *  <p>
+     *  Simultaneous use of multiple iterators from the same reader is undefined behavior.
+     *  <p>
+     *  Iterators are not safe for concurrent use from multiple threads.
      */
     @Override
     public Iterator<Record> iterator()
     {
+        millisBehindLatest = 0;
         return new RecordIterator();
     }
 
@@ -224,6 +232,17 @@ implements Iterable<Record>
     public Map<String,String> getCurrentSequenceNumbers()
     {
         return new TreeMap<String,String>(offsets);
+    }
+
+
+    /**
+     *  Returns an estimate of the reader's lag behind the end of the stream. This
+     *  value is calculated as the maximum value for all shards in the current
+     *  iteration. As such, it is only valid <em>at the end of the iteration</em>.
+     */
+    public long getMillisBehindLatest()
+    {
+        return millisBehindLatest;
     }
 
 //----------------------------------------------------------------------------
@@ -268,6 +287,7 @@ implements Iterable<Record>
 
             Record record = currentRecords.removeFirst();
             offsets.put(currentShardId, record.getSequenceNumber());
+            // TODO - purge parent offsets
             return record;
         }
 
@@ -302,7 +322,6 @@ implements Iterable<Record>
             if (shardIds == null)
             {
                 shardIds = new LinkedList<String>(shardIterators.keySet());
-                // TODO - purge offsets for any shards that aren't in this list
             }
 
             while (currentRecords.isEmpty() && (! shardIds.isEmpty()))
@@ -358,7 +377,7 @@ implements Iterable<Record>
             {
                 GetRecordsResult response = client.getRecords(new GetRecordsRequest().withShardIterator(shardItx));
                 currentRecords.addAll(response.getRecords());
-                // TODO - track millis behind latest
+                millisBehindLatest = Math.max(millisBehindLatest, response.getMillisBehindLatest().longValue());
 
                 String nextShardIterator = response.getNextShardIterator();
                 shardIterators.put(currentShardId, nextShardIterator);

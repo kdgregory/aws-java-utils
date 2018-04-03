@@ -21,6 +21,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -814,4 +815,33 @@ public class TestKinesisReader
         assertLogMessages("unable to retrieve iterators log messages", "unable to retrieve shard iterators", 2, Level.WARN);
     }
 
+
+    @Test
+    public void testMillisBehindLatest() throws Exception
+    {
+        KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0, RECORDS_1)
+        {
+            LinkedList<Long> millisByRequest = new LinkedList<Long>(Arrays.asList(350L, 600L));
+
+            @Override
+            public GetRecordsResult getRecords(GetRecordsRequest request)
+            {
+                return super.getRecords(request)
+                       .withMillisBehindLatest(millisByRequest.removeFirst());
+            }
+
+        };
+
+        KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).readFromTrimHorizon().withTimeout(50);
+
+        assertEquals("value before iteration", 0, reader.getMillisBehindLatest());
+
+        retrieveRecords(reader);
+
+        assertEquals("value after all records read", 600, reader.getMillisBehindLatest());
+
+        reader.iterator();
+
+        assertEquals("value after creating new iterator", 0, reader.getMillisBehindLatest());
+    }
 }
