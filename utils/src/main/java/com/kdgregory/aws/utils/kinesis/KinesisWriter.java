@@ -14,52 +14,98 @@
 
 package com.kdgregory.aws.utils.kinesis;
 
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.model.*;
 
+import com.kdgregory.aws.utils.CommonUtils;
+
 
 /**
  *  An instantiable class that accumulates batches of log messages and uploads
- *  them with <code>putRecords()</code>.
+ *  them with <code>PutRecords</code>, retaining records that were throttled.
+ *
+ *  <h1> Error Handling and Send Failure </h1>
+ *
+ *  Kinesis can throttle <code>GetRecords</code> requests at both the request and
+ *  individual record level; the first causes an exception while the second just
+ *  sets an error code in the response for that record. In both cases the writer
+ *  will retain the records for a future send attempt and write a WARN-level
+ *  message to the log.
+ *  <p>
+ *  All other exceptions are propagated to the caller, with unsent messages retained
+ *  for a future send attempt. This includes <code>KMSThrottlingException</code>: to
+ *  treat it as "just throttling" would require adding a dependency that not all
+ *  clients would need.
+ *
+ *  <h1> General Notes </h1>
+ *
+ *  Because Kinesis may fail individual records, which are then retained by the
+ *  writer, there is no guarantee that the order of records in a shard will match
+ *  the order that they were added to the writer.
+ *  <p>
+ *  Attempting to send without any records is assumed to be an appllication error,
+ *  and results in a WARN-level log message. If you are doing this intentionally
+ *  (for example, sending on an interval regardless of contents) you should call
+ *  {@link #getUnsentRecords} and verify that it's non-empty before sending.
+ *  <p>
+ *  This class is <em>not</em> safe for concurrent use by multiple threads.
+ *
+ *  <h1> Example </h1>
  */
 public class KinesisWriter
 {
+    private final static int    MAX_RECORD_SIZE         = 1024 * 1024;
+    private final static int    MAX_RECORDS_PER_REQUEST = 500;
+    private final static int    MAX_REQUEST_SIZE        = 5 * 1024 * 1024;
+
+//----------------------------------------------------------------------------
+//  Instance variables and constructor
+//----------------------------------------------------------------------------
+
+    private Log logger = LogFactory.getLog(getClass());
+
+    private AmazonKinesis client;
+    private String streamName;
+
+    private List<PutRecordsRequestEntry> unsentRecords = new ArrayList<PutRecordsRequestEntry>();
+    private int unsentRecordsSize = 0;
+
+    private List<PutRecordsResultEntry> lastSendResults = Collections.emptyList();
+
+
     public KinesisWriter(AmazonKinesis client, String streamName)
     {
-        throw new UnsupportedOperationException("FIXME - implement");
+        this.client = client;
+        this.streamName = streamName;
     }
 
-
-    /**
-     *  Checks the size of the passed message to verify that it can be sent (even if
-     *  in a batch of 1).
-     */
-    public boolean checkMessageSize(String partitionKey, String data)
-    {
-        throw new UnsupportedOperationException("FIXME - implement");
-    }
-
-
-    /**
-     *  Checks the size of the passed message to verify that it can be sent (even if
-     *  in a batch of 1).
-     */
-    public boolean checkMessageSize(String partitionKey, byte[] data)
-    {
-        throw new UnsupportedOperationException("FIXME - implement");
-    }
-
+//----------------------------------------------------------------------------
+//  Public API
+//----------------------------------------------------------------------------
 
     /**
      *  Attempts to add a record to the current batch, encoding them using UTF-8.
      *  Returns true if able to do so, false if adding the record would exceed
      *  Amazon's batch size.
+     *  <p>
+     *  Throws a <code>RuntimeException</code> if unable to convert the string to
+     *  UTF-8. This indicates a severe problem with the JVM, so there's no point
+     *  in continuing.
      */
     public boolean addRecord(String partitionKey, String data)
     {
-        throw new UnsupportedOperationException("FIXME - implement");
+        return addRecord(partitionKey, CommonUtils.toUTF8(data));
     }
 
 
@@ -69,17 +115,23 @@ public class KinesisWriter
      */
     public boolean addRecord(String partitionKey, byte[] data)
     {
-        throw new UnsupportedOperationException("FIXME - implement");
-    }
+        if (unsentRecords.size() >= MAX_RECORDS_PER_REQUEST)
+            return false;
 
+        int partitionKeySize = CommonUtils.toUTF8(partitionKey).length;
+        int dataSize = data.length;
 
-    /**
-     *  Returns all records currently in the batch. These are the actual records to
-     *  be sent, so any changes by the caller may cause errors in sending.
-     */
-    public List<Record> getUnsentRecords()
-    {
-        throw new UnsupportedOperationException("FIXME - implement");
+        if (partitionKeySize + dataSize > MAX_RECORD_SIZE)
+            return false;
+
+        if (partitionKeySize + dataSize + unsentRecordsSize > MAX_REQUEST_SIZE)
+            return false;
+
+        unsentRecordsSize += partitionKeySize + dataSize;
+        unsentRecords.add(new PutRecordsRequestEntry()
+                           .withPartitionKey(partitionKey)
+                           .withData(ByteBuffer.wrap(data)));
+        return true;
     }
 
 
@@ -97,16 +149,115 @@ public class KinesisWriter
      */
     public void send()
     {
-        throw new UnsupportedOperationException("FIXME - implement");
+        if (unsentRecords.isEmpty())
+        {
+            logger.warn("attempted empty send to " + streamName);
+            return;
+        }
+
+        try
+        {
+            PutRecordsRequest request = new PutRecordsRequest()
+                                        .withStreamName(streamName)
+                                        .withRecords(unsentRecords);
+            PutRecordsResult response = client.putRecords(request);
+            lastSendResults = response.getRecords();
+        }
+        catch (ProvisionedThroughputExceededException ex)
+        {
+            logger.warn("provisioned throughput exceeded for stream " + streamName);
+            return;
+        }
+
+        // we need to retain any individual records that failed; the easiest way to do
+        // this is just reset the record cache ... but we need to create an iterator
+        // on the old cache before doing that!
+
+        Iterator<PutRecordsRequestEntry> requestEntryItx = unsentRecords.iterator();
+        clear();
+
+        int successCount = 0;
+        int failureCount = 0;
+        Map<String,Integer> failureCounts = new TreeMap<String,Integer>();
+        Map<String,String> failureDetail = new TreeMap<String,String>();
+
+        for (PutRecordsResultEntry resultEntry : lastSendResults)
+        {
+            PutRecordsRequestEntry requestEntry = requestEntryItx.next();
+            if ((resultEntry.getErrorCode() != null) && (resultEntry.getErrorCode().length() > 0))
+            {
+                failureCount++;
+                Integer count = failureCounts.get(resultEntry.getErrorCode());
+                count = (count != null)
+                      ? count + 1
+                      : Integer.valueOf(1);
+                failureCounts.put(resultEntry.getErrorCode(), count);
+                failureDetail.put(resultEntry.getErrorCode(), resultEntry.getErrorMessage());
+
+                addRecord(requestEntry.getPartitionKey(), requestEntry.getData().array());
+            }
+            else
+            {
+                successCount++;
+            }
+        }
+
+        if (logger.isDebugEnabled())
+        {
+            logger.debug("sent " + successCount + " of " + (successCount + failureCount) + " records to " + streamName);
+        }
+
+        for (String errorType : failureCounts.keySet())
+        {
+            logger.warn("partial failure sending to " + streamName + ": "
+                        + failureCounts.get(errorType) + " records retained due to " + errorType
+                        + " (sample message: " + failureDetail.get(errorType) + ")");
+        }
     }
 
 
     /**
-     *  Returns the raw results from sending the last batch of records. Each record in the
-     *  result corresponds to a record in the pre-send list of records.
+     *  Deletes all unsent records.
+     */
+    public void clear()
+    {
+        // this is called as part of send() post-processing so we don't want to reuse
+        // existing list
+        unsentRecords = new ArrayList<PutRecordsRequestEntry>();
+        unsentRecordsSize = 0;
+    }
+
+
+    /**
+     *  Returns a list of all records currently in the batch. These are the actual records
+     *  to be sent, so any changes by the caller may cause operational errors.
+     */
+    public List<PutRecordsRequestEntry> getUnsentRecords()
+    {
+        return unsentRecords;
+    }
+
+
+    /**
+     *  Returns the calculated size of the current unsent records.
+     */
+    public int getUnsentRecordSize()
+    {
+        return unsentRecordsSize;
+    }
+
+
+    /**
+     *  Returns a list containing the raw per-record results from the  last {@link #send}.
+     *  This can be used to check detailed error codes or sequence numbers.
      */
     public List<PutRecordsResultEntry> getSendResults()
     {
-        throw new UnsupportedOperationException("FIXME - implement");
+        return lastSendResults;
     }
+
+//----------------------------------------------------------------------------
+//  Internals
+//----------------------------------------------------------------------------
+
 }

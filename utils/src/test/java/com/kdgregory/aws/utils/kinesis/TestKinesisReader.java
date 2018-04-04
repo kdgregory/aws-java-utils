@@ -162,7 +162,7 @@ public class TestKinesisReader
      *  Note: to simplify mock implementation, shard iterators and sequence
      *  numbers use the same format.
      */
-    private static class KinesisMock extends SelfMock<AmazonKinesis>
+    public static class KinesisMock extends SelfMock<AmazonKinesis>
     {
         private String expectedStreamName;
         private Map<String,List<Record>> recordsByShard = new HashMap<String,List<Record>>();
@@ -187,7 +187,6 @@ public class TestKinesisReader
             }
         }
 
-        @SuppressWarnings("unused")
         public DescribeStreamResult describeStream(DescribeStreamRequest request)
         {
             assertEquals("request contains stream name", expectedStreamName, request.getStreamName());
@@ -200,7 +199,6 @@ public class TestKinesisReader
                            .withHasMoreShards(Boolean.FALSE));
         }
 
-        @SuppressWarnings("unused")
         public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
         {
             assertShardIteratorRequest(request);

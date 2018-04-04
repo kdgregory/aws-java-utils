@@ -14,6 +14,7 @@
 
 package com.kdgregory.aws.utils;
 
+import java.io.UnsupportedEncodingException;
 
 /**
  *  Static utility methods that cross service boundaries.
@@ -38,6 +39,24 @@ public class CommonUtils
         catch (InterruptedException ex)
         {
             return true;
+        }
+    }
+
+
+    /**
+     *  Converts a string to its UTF-8 representation. Replaces the checked exception
+     *  with a runtime exception that should never happen unless the JVM installation
+     *  is completely borked.
+     */
+    public static byte[] toUTF8(String str)
+    {
+        try
+        {
+            return str.getBytes("UTF-8");
+        }
+        catch (UnsupportedEncodingException ex)
+        {
+            throw new RuntimeException("JVM does not support UTF-8", ex);
         }
     }
 
