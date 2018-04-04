@@ -48,6 +48,7 @@ import com.amazonaws.util.BinaryUtils;
  */
 public class TestKinesisReader
 {
+    private Logger myLogger = Logger.getLogger(getClass());
 
     private LinkedBlockingQueue<LoggingEvent> loggingEvents = new LinkedBlockingQueue<LoggingEvent>();
 
@@ -269,8 +270,6 @@ public class TestKinesisReader
         }
     }
 
-
-
 //----------------------------------------------------------------------------
 //  Setup and teardown
 //----------------------------------------------------------------------------
@@ -309,6 +308,8 @@ public class TestKinesisReader
     @Test
     public void testSingleShardNoOffsetsDefaultTrimHorizon() throws Exception
     {
+        myLogger.info("testSingleShardNoOffsetsDefaultTrimHorizon");
+
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0)
         {
             @Override
@@ -328,6 +329,8 @@ public class TestKinesisReader
     @Test
     public void testSingleShardNoOffsetsDefaultLatest() throws Exception
     {
+        myLogger.info("testSingleShardNoOffsetsDefaultLatest");
+
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0)
         {
             @Override
@@ -347,6 +350,8 @@ public class TestKinesisReader
     @Test
     public void testSingleShardWithOffsets() throws Exception
     {
+        myLogger.info("testSingleShardWithOffsets");
+
         final String sequenceNumber0 = formatSequenceNumber(SHARDID_0, 0);
 
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0)
@@ -375,6 +380,8 @@ public class TestKinesisReader
     @Test
     public void testSingleShardRepeatedRead() throws Exception
     {
+        myLogger.info("testSingleShardRepeatedRead");
+
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0)
         {
             @Override
@@ -406,6 +413,8 @@ public class TestKinesisReader
     @Test
     public void testSingleShardAtEndOfStreamDoesNotRepeat() throws Exception
     {
+        myLogger.info("testSingleShardAtEndOfStreamDoesNotRepeat");
+
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0);
 
         KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).readFromTrimHorizon();
@@ -418,6 +427,8 @@ public class TestKinesisReader
     @Test
     public void testMultipleShardsNoOffsetsDefaultTrimHorizon() throws Exception
     {
+        myLogger.info("testMultipleShardsNoOffsetsDefaultTrimHorizon");
+
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0, RECORDS_1);
         KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).readFromTrimHorizon();
 
@@ -433,6 +444,8 @@ public class TestKinesisReader
     @Test
     public void testMultipleShardsWithOffsets() throws Exception
     {
+        myLogger.info("testMultipleShardsWithOffsets");
+
         final String sequenceNumber0 = formatSequenceNumber(SHARDID_0, 0);
         final String sequenceNumber1 = formatSequenceNumber(SHARDID_1, 0);
 
@@ -476,6 +489,8 @@ public class TestKinesisReader
     @Test
     public void testMultipleShardsOnlyOneHasOffsets() throws Exception
     {
+        myLogger.info("testMultipleShardsOnlyOneHasOffsets");
+
         final String sequenceNumber0 = formatSequenceNumber(SHARDID_0, 0);
 
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0, RECORDS_1)
@@ -517,6 +532,8 @@ public class TestKinesisReader
     @Test
     public void testParentIsConsumedBeforeChild() throws Exception
     {
+        myLogger.info("testParentIsConsumedBeforeChild");
+
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0, RECORDS_1)
         {
             @Override
@@ -555,6 +572,8 @@ public class TestKinesisReader
     @Test
     public void testUnbalancedTreeOffsetsOnShortSide() throws Exception
     {
+        myLogger.info("testUnbalancedTreeOffsetsOnShortSide");
+
         final String sequenceNumber1 = formatSequenceNumber(SHARDID_1, 0);
 
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0, RECORDS_1, RECORDS_2, RECORDS_3, RECORDS_4)
@@ -643,6 +662,8 @@ public class TestKinesisReader
     @Test
     public void testUnbalancedTreeOffsetsOnLongSide() throws Exception
     {
+        myLogger.info("testUnbalancedTreeOffsetsOnLongSide");
+
         final String sequenceNumber4 = formatSequenceNumber(SHARDID_4, 0);
 
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0, RECORDS_1, RECORDS_2, RECORDS_3, RECORDS_4)
@@ -738,6 +759,8 @@ public class TestKinesisReader
     @Test
     public void testThrottling() throws Exception
     {
+        myLogger.info("testThrottling");
+
         final AtomicInteger getRecordsInvocationCount = new AtomicInteger(0);
 
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_1)
@@ -769,6 +792,8 @@ public class TestKinesisReader
     @Test
     public void testExpiredIterator() throws Exception
     {
+        myLogger.info("testExpiredIterator");
+
         final AtomicInteger getRecordsInvocationCount = new AtomicInteger(0);
 
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_1)
@@ -800,6 +825,8 @@ public class TestKinesisReader
     @Test
     public void testTimeoutRetrievingShardIterators() throws Exception
     {
+        myLogger.info("testTimeoutRetrievingShardIterators");
+
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0, RECORDS_1, RECORDS_2)
         {
             @Override
@@ -824,6 +851,8 @@ public class TestKinesisReader
     @Test
     public void testMillisBehindLatest() throws Exception
     {
+        myLogger.info("testMillisBehindLatest");
+
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0, RECORDS_1)
         {
             LinkedList<Long> millisByRequest = new LinkedList<Long>(Arrays.asList(350L, 600L));
