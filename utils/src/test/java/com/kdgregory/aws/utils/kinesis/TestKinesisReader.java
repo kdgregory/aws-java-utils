@@ -143,9 +143,13 @@ public class TestKinesisReader
     private Map<String,String> getShardIterators(KinesisReader reader)
     throws Exception
     {
-        Field field = reader.getClass().getDeclaredField("shardIterators");
-        field.setAccessible(true);
-        return (Map<String,String>)field.get(reader);
+        Field fShardManager = reader.getClass().getDeclaredField("shardManager");
+        fShardManager.setAccessible(true);
+        Object shardManager = fShardManager.get(reader);
+
+        Field fShardIterators = shardManager.getClass().getDeclaredField("shardIterators");
+        fShardIterators.setAccessible(true);
+        return (Map<String,String>)fShardIterators.get(shardManager);
     }
 
 
@@ -539,11 +543,12 @@ public class TestKinesisReader
         KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).readFromTrimHorizon();
 
         assertEquals("records from first read", RECORDS_0, retrieveRecords(reader));
-        assertNull("after first read, shard 0 iterator is null", getShardIterators(reader).get(SHARDID_0));
+        assertNotNull("after first read, has offsets for parent",   reader.getCurrentSequenceNumbers().get(SHARDID_0));
+        assertNull("after first read, has no offsets for child",     reader.getCurrentSequenceNumbers().get(SHARDID_1));
 
         assertEquals("records from second read", RECORDS_1, retrieveRecords(reader));
-        assertNull("after first read, shard 0 iterator is null", getShardIterators(reader).get(SHARDID_0));
-        assertNull("after first read, shard 1 iterator is null", getShardIterators(reader).get(SHARDID_1));
+        assertNull("after second read, has no offsets for parent",  reader.getCurrentSequenceNumbers().get(SHARDID_0));
+        assertNotNull("after second read, has offsets for child",   reader.getCurrentSequenceNumbers().get(SHARDID_1));
     }
 
 
