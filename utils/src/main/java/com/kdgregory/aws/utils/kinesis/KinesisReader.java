@@ -118,6 +118,26 @@ import com.amazonaws.services.kinesis.model.*;
  *  safe for concurrent use from multiple threads.
  *
  *  <h1> Example </h1>
+ *
+ *  This example assumes that the sequence numbers from the stream have been
+ *  saved somewhere. After each iteration it will save the offsets and then
+ *  sleep before iterating again.
+ *
+ *  <pre>
+ *  AmazonKinesis client = AmazonKinesisClientBuilder.defaultClient();
+ *  Map<String,String> offsets = // retrieve from somewhere or use empty map
+ *  KinesisReader reader = new KinesisReader(client, "example").withInitialSequenceNumbers(offsets);
+ *
+ *  while (true) {
+ *      for (Record record : reader) {
+ *          byte[] data = BinaryUtils.copyAllBytesFrom(record.getData());
+ *          // do something with data
+ *      }
+ *      offsets = reader.getCurrentSequenceNumbers();
+ *      // save these offsets
+ *      Thread.sleep(1000);
+ *  }
+ *  </pre>
  */
 public class KinesisReader
 implements Iterable<Record>

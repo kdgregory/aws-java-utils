@@ -72,7 +72,36 @@ import com.kdgregory.aws.utils.CommonUtils;
  *  <p>
  *  This class is <em>not</em> safe for concurrent use by multiple threads.
  *
- *  <h1> Example </h1>
+ *  <h1> Example </h1> *  <h1> Example </h1>
+ *
+ *  This example reads from a <code>BufferedReader</code> and sends each line as
+ *  a separate record using a random partition key. Note that <code>send()</code>
+ *  is triggered when we can't write the record. Note also the sleep after each
+ *  send, the second attempt to write the record (with possible error), and the
+ *  loop at the end to ensure that all records are sent.
+ *
+ *  <pre>
+ *  AmazonKinesis client = AmazonKinesisClientBuilder.defaultClient();
+ *  KinesisWriter writer = new KinesisWriter(client, "example");
+ *
+ *  BufferedReader in = // get it from somewhere, remember to close it
+ *  String inputLine = "";
+ *  while ((inputLine = in.readLine()) != null) {
+ *      if (! writer.addRecord(null, inputLine)) {
+ *          writer.send();
+ *          Thread.sleep(1000);
+ *      }
+ *      if (! writer.addRecord(null, inputLine)) {
+ *          System.err.println("sending did not make room for new record");
+ *          // we'll drop this record
+ *      }
+ *  }
+ *
+ *  while (writer.getUnsentRecords().size() > 0) {
+ *      writer.send();
+ *      Thread.sleep(1000);
+ *  }
+ *  </pre>
  */
 public class KinesisWriter
 {
@@ -227,7 +256,7 @@ public class KinesisWriter
 
         for (String errorType : failureCounts.keySet())
         {
-            logger.warn("failed to send " + failureCounts.get(errorType) 
+            logger.warn("failed to send " + failureCounts.get(errorType)
                         + " records to " + streamName + " due to " + errorType
                         + " (sample message: " + failureDetail.get(errorType) + ")");
         }

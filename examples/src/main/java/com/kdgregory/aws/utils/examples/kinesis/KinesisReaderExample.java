@@ -27,8 +27,10 @@ import com.kdgregory.aws.utils.kinesis.KinesisReader;
 
 
 /**
- *  Simple stream reader: reads from the end of the named stream unless provided
- *  with offsets.
+ *  Simple stream reader: makes a single iteration of the reader every second.
+ *  Can be provided with offsets (shard number / sequence number pairs) on the
+ *  command line; if not provided with offsets will start reading from the end 
+ *  of the stream.
  *  <p>
  *  Invocation:
  *  <pre>
@@ -36,7 +38,7 @@ import com.kdgregory.aws.utils.kinesis.KinesisReader;
  *  </pre>
  *  Where:
  *  <ul>
- *  <li> STREAM_NAME is the name of the stream
+ *  <li> STREAM_NAME is the name of the source stream
  *  <li> SHARD_ID identifies a shard in that stream
  *  <li> SEQUENCE_NUMBER is the last sequence number read from that shard (so this run will
  *       start with the next record in the shard)
@@ -61,7 +63,6 @@ public class KinesisReaderExample
             System.out.println();
             System.out.println();
             System.out.println(new Date());
-            System.out.println("Offsets: " + reader.getCurrentSequenceNumbers());
 
             for (Record record : reader)
             {
@@ -73,7 +74,8 @@ public class KinesisReaderExample
                 System.out.println("content:         " + text);
             }
 
-            Thread.sleep(250);
+            System.out.println("Offsets: " + reader.getCurrentSequenceNumbers());
+            Thread.sleep(1000);
         }
     }
 }
