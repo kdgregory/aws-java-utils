@@ -222,7 +222,7 @@ public class TestKinesisWriter
         assertEquals("after send, number of unsent records", 1, writer.getUnsentRecords().size());
         assertEquals("after send, size of unsent records",   7, writer.getUnsentRecordSize());
 
-        assertLogMessage(Level.WARN, "partial failure.*" + STREAM_NAME + ".* 1 .*ProvisionedThroughputExceeded");
+        assertLogMessage(Level.WARN, " 1 .*" + STREAM_NAME + ".*ProvisionedThroughputExceeded");
     }
 
 

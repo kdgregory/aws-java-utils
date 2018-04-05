@@ -227,8 +227,8 @@ public class KinesisWriter
 
         for (String errorType : failureCounts.keySet())
         {
-            logger.warn("partial failure sending to " + streamName + ": "
-                        + failureCounts.get(errorType) + " records retained due to " + errorType
+            logger.warn("failed to send " + failureCounts.get(errorType) 
+                        + " records to " + streamName + " due to " + errorType
                         + " (sample message: " + failureDetail.get(errorType) + ")");
         }
     }
