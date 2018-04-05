@@ -15,8 +15,10 @@
 package com.kdgregory.aws.utils.kinesis;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import org.junit.Before;
@@ -392,4 +394,36 @@ public class TestKinesisWriter
         assertFalse("unable to make request > 5 MB", writer.addRecord("foo", "bar"));
     }
 
+
+    @Test
+    public void testRandomPartitionKey() throws Exception
+    {
+        myLogger.info("testRandomPartitionKey");
+
+        final Set<String> actualPartitionKeys = new HashSet<String>();
+
+        KinesisMock mock = new KinesisMock(STREAM_NAME)
+        {
+            @Override
+            protected PutRecordsResultEntry processRecord(PutRecordsRequestEntry record, int index)
+            {
+                actualPartitionKeys.add(record.getPartitionKey());
+                return super.processRecord(record, index);
+            }
+        };
+        KinesisWriter writer = new KinesisWriter(mock.getInstance(), STREAM_NAME);
+
+        for (int ii = 0 ; ii < 5 ; ii++)
+        {
+            writer.addRecord(null, String.valueOf(ii));
+            writer.addRecord("", String.valueOf(ii + 10));
+        }
+
+        writer.send();
+        assertEquals("after send, number of unsent records", 0, writer.getUnsentRecords().size());
+
+        // since we're using the standard Java random number generator we know that it
+        // has a long cycle without repeats so this is a valid assertion
+        assertEquals("number of distinct partition keys", 10, actualPartitionKeys.size());
+    }
 }

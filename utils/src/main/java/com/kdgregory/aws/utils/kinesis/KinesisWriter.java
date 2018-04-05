@@ -20,6 +20,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.TreeMap;
 
 import org.apache.commons.logging.Log;
@@ -34,6 +35,16 @@ import com.kdgregory.aws.utils.CommonUtils;
 /**
  *  An instantiable class that accumulates batches of log messages and uploads
  *  them with <code>PutRecords</code>, retaining records that were throttled.
+ *
+ *  <h1> Partition Keys </h1>
+ *
+ *  Kinesis requires that each record be associated with a partition key, and
+ *  uses that partition key to assign the record to a shard. For high-volume
+ *  producers, a random partition key will maximize throughput (assuming that
+ *  you have multiple shards). To support this, the {@link #addRecord} methods
+ *  accept a null or empty partition key, and replace it with a random key
+ *  (using the standard <code>Random</code> class -- there's no need for
+ *  cryptographically-secure randomness for this application).
  *
  *  <h1> Error Handling and Send Failure </h1>
  *
@@ -78,6 +89,8 @@ public class KinesisWriter
     private AmazonKinesis client;
     private String streamName;
 
+    private Random partitionKeyRandomizer = new Random();
+
     private List<PutRecordsRequestEntry> unsentRecords = new ArrayList<PutRecordsRequestEntry>();
     private int unsentRecordsSize = 0;
 
@@ -117,6 +130,11 @@ public class KinesisWriter
     {
         if (unsentRecords.size() >= MAX_RECORDS_PER_REQUEST)
             return false;
+
+        if ((partitionKey == null) || partitionKey.isEmpty())
+        {
+            partitionKey = String.format("%08x", partitionKeyRandomizer.nextInt());
+        }
 
         int partitionKeySize = CommonUtils.toUTF8(partitionKey).length;
         int dataSize = data.length;
