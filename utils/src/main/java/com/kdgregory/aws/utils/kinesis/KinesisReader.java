@@ -354,9 +354,9 @@ implements Iterable<Record>
             String shardItx = shardManager.getIterator(currentShardId);
             if (shardItx == null)
             {
-                // this should only happen if we reload shards halfway though and one has disappeared
-                // ie, not likely but possible
-                logger.warn("no iterator for shard: stream = " + streamName + ", shard = " + currentShardId);
+                // this will happen if the stream is resized under us; it can also
+                // happen if we reload iterators halfway through an iteration (due
+                // to iterator expiration)
                 return;
             }
 
@@ -367,11 +367,7 @@ implements Iterable<Record>
                 millisBehindLatest = Math.max(millisBehindLatest, response.getMillisBehindLatest().longValue());
 
                 String nextShardIterator = response.getNextShardIterator();
-                shardManager.putIterator(currentShardId, nextShardIterator);
-                if (nextShardIterator == null)
-                {
-                    shardManager.retrieveChildIterators(currentShardId);
-                }
+                shardManager.updateIterator(currentShardId, nextShardIterator);
             }
             catch (ProvisionedThroughputExceededException ex)
             {
@@ -409,11 +405,18 @@ implements Iterable<Record>
 
 
         /**
-         *  Updates the iterator for the specified shard.
+         *  Updates the iterator for the specified shard. If passed a null iterator,
+         *  replaces the iterator with those of its children.
          */
-        public void putIterator(String shardId, String shardIterator)
+        public void updateIterator(String shardId, String shardIterator)
         {
             shardIterators.put(shardId, shardIterator);
+            if (shardIterator == null)
+            {
+                // this method will remove the existing iterator if able to retrieve children
+                retrieveChildIterators(shardId);
+            }
+
         }
 
 
@@ -527,7 +530,10 @@ implements Iterable<Record>
                 itxTypes.put(shard.getShardId(), ShardIteratorType.TRIM_HORIZON);
             }
 
-            retrieveIterators(itxTypes, timeoutAt);
+            if (retrieveIterators(itxTypes, timeoutAt))
+            {
+                shardIterators.remove(parentShardId);
+            }
         }
 
 
@@ -538,7 +544,12 @@ implements Iterable<Record>
         }
 
 
-        private void retrieveIterators(Map<String,ShardIteratorType> iteratorTypes, long timeoutAt)
+        /**
+         *  Retrieves a specific set of iterators (may not be all iterators belonging to
+         *  the shard). Returns <code>true</code> if able to do this, <code>false</code>
+         *  if the retrieve times-out.
+         */
+        private boolean retrieveIterators(Map<String,ShardIteratorType> iteratorTypes, long timeoutAt)
         {
             // we store in a local map so that we don't apply a partial update to the master map
             Map<String,String> result = new TreeMap<String,String>();
@@ -550,16 +561,17 @@ implements Iterable<Record>
                 String offset = offsets.get(shardId);
                 long currentTimeout = timeoutAt - System.currentTimeMillis();
                 if (currentTimeout < 0)
-                    return;
+                    return false;
 
                 String shardIterator = KinesisUtils.retrieveShardIterator(client, streamName, shardId, iteratorType, offset, null, currentTimeout);
                 if (currentTimeout < 0)
-                    return;
+                    return false;
 
                 result.put(shardId, shardIterator);
             }
 
             shardIterators.putAll(result);
+            return true;
         }
 
 
