@@ -10,46 +10,22 @@
     <name>AWS Java utils -- Integration tests</name>
 
     <description>
-        Utility classes that provide a higher-level programming interface on
-        top of the AWS Java SDK.
+        Exercises the AWS Utils. Note that these tests create resources that
+        will incur charges from AWS.
     </description>
-
-    <url> https://github.com/kdgregory/aws-java-utils </url>
-
-    <licenses>
-        <license>
-            <name>The Apache License, Version 2.0</name>
-            <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
-        </license>
-    </licenses>
-
-    <developers>
-        <developer>
-            <name>Keith D Gregory</name>
-            <email>kdgregory@users.noreply.github.com</email>
-        </developer>
-    </developers>
-
-    <scm>
-        <connection>scm:git:https://github.com/kdgregory/aws-java-utils.git</connection>
-        <developerConnection>scm:git:git@github.com:kdgregory/aws-java-utils.git</developerConnection>
-        <url>https://github.com/kdgregory/aws-java-utils</url>
-    </scm>
 
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
-        <aws-sdk.version>1.11.213</aws-sdk.version>
+        <aws-sdk.version>1.11.292</aws-sdk.version>
+        <commons.logging.version>1.1.3</commons.logging.version>
         <junit.version>4.10</junit.version>
         <kdgcommons.version>1.0.16-SNAPSHOT</kdgcommons.version>
         <log4j.version>1.2.16</log4j.version>
-        <practicalxml.version>1.1.18</practicalxml.version>
 
         <plugin.compiler.version>3.1</plugin.compiler.version>
-        <plugin.findbugs.version>2.4.0</plugin.findbugs.version>
-        <plugin.changes.version>2.3</plugin.changes.version>
     </properties>
 
 
@@ -59,28 +35,32 @@
             <artifactId>aws-java-utils</artifactId>
             <version>${project.version}</version>
         </dependency>
+
         <dependency>
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-java-sdk-kinesis</artifactId>
             <version>${aws-sdk.version}</version>
+        </dependency>
+         <dependency>
+            <groupId>commons-logging</groupId>
+            <artifactId>commons-logging</artifactId>
+            <version>${commons.logging.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>log4j</groupId>
+            <artifactId>log4j</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.sf.kdgcommons</groupId>
+            <artifactId>kdgcommons</artifactId>
+            <version>${kdgcommons.version}</version>
         </dependency>
 
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <version>${junit.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>net.sf.kdgcommons</groupId>
-            <artifactId>kdgcommons</artifactId>
-            <version>${kdgcommons.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>net.sf.practicalxml</groupId>
-            <artifactId>practicalxml</artifactId>
-            <version>${practicalxml.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -100,56 +80,5 @@
             </plugin>
         </plugins>
     </build>
-
-
-    <reporting>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-changes-plugin</artifactId>
-                <version>${plugin.changes.version}</version>
-                <configuration>
-                    <xmlPath>${basedir}/src/site/changes.xml</xmlPath>
-                </configuration>
-                <reportSets>
-                    <reportSet>
-                        <reports>
-                            <report>changes-report</report>
-                        </reports>
-                    </reportSet>
-                </reportSets>
-            </plugin>
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>cobertura-maven-plugin</artifactId>
-                <configuration>
-                    <instrumentation>
-                        <excludes>
-                            <exclude>**/Test*.class</exclude>
-                            <exclude>**/Abstract*.class</exclude>
-                            <exclude>**/testhelpers/**/*.class</exclude>
-                        </excludes>
-                    </instrumentation>
-                    <executions>
-                        <execution>
-                            <goals>
-                                <goal>clean</goal>
-                            </goals>
-                        </execution>
-                    </executions>
-                </configuration>
-            </plugin>
-        </plugins>
-    </reporting>
-
-
-    <!-- local distribution management so I can review before deploying to Sonatype OSSHR -->
-    <distributionManagement>
-        <repository>
-            <id>build</id>
-            <name>Local Deployment Directory</name>
-            <url>file://${project.build.directory}/deploy</url>
-        </repository>
-    </distributionManagement>
 
 </project>
