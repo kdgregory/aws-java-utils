@@ -143,6 +143,37 @@ public class TestKinesisWriter
     }
 
 
+    /**
+     *  A variant of the mock that fails 1 out of N records.
+     */
+    public static class PartialThrottlingMock extends KinesisMock
+    {
+        private int failureMod;
+
+        public PartialThrottlingMock(String streamName, int failureMod)
+        {
+            super(streamName);
+            this.failureMod = failureMod;
+        }
+
+        @Override
+        protected PutRecordsResultEntry processRecord(PutRecordsRequestEntry record, int index)
+        {
+            // note: mod must not be 0 or we'll never end
+            if (index % failureMod == 1)
+            {
+                return new PutRecordsResultEntry()
+                       .withErrorCode("")
+                       .withErrorCode("ProvisionedThroughputExceededException");
+            }
+            else
+            {
+                return super.processRecord(record, index);
+            }
+        }
+    }
+
+
 //----------------------------------------------------------------------------
 //  Testcases
 //----------------------------------------------------------------------------
@@ -182,23 +213,7 @@ public class TestKinesisWriter
     {
         myLogger.info("testPartialThrottling");
 
-        KinesisMock mock = new KinesisMock(STREAM_NAME)
-        {
-            @Override
-            protected PutRecordsResultEntry processRecord(PutRecordsRequestEntry record, int index)
-            {
-                if (index % 2 == 1)
-                {
-                    return new PutRecordsResultEntry()
-                           .withErrorCode("")
-                           .withErrorCode("ProvisionedThroughputExceededException");
-                }
-                else
-                {
-                    return super.processRecord(record, index);
-                }
-            }
-        };
+        KinesisMock mock = new PartialThrottlingMock(STREAM_NAME, 2);
         KinesisWriter writer = new KinesisWriter(mock.getInstance(), STREAM_NAME);
 
         writer.addRecord("foo", "bar");
@@ -380,7 +395,6 @@ public class TestKinesisWriter
         KinesisMock mock = new KinesisMock(STREAM_NAME);
         KinesisWriter writer = new KinesisWriter(mock.getInstance(), STREAM_NAME);
 
-
         String partitionKey = "foo";
         String bigMessage = StringUtil.repeat('A', 1024 * 1024 - partitionKey.length() - 1);
 
@@ -425,5 +439,24 @@ public class TestKinesisWriter
         // since we're using the standard Java random number generator we know that it
         // has a long cycle without repeats so this is a valid assertion
         assertEquals("number of distinct partition keys", 10, actualPartitionKeys.size());
+    }
+
+
+    @Test
+    public void testSendAll() throws Exception
+    {
+        myLogger.info("testSendAll");
+
+        KinesisMock mock = new PartialThrottlingMock(STREAM_NAME, 3);
+        KinesisWriter writer = new KinesisWriter(mock.getInstance(), STREAM_NAME);
+
+        for (int ii = 0 ; ii < 10 ; ii++)
+        {
+            writer.addRecord(String.valueOf(ii), "blah");
+        }
+
+        writer.sendAll(2000);
+
+        assertEquals("unsent record count", 0, writer.getUnsentRecords().size());
     }
 }

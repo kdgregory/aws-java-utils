@@ -73,14 +73,7 @@ public class TestKinesis
             writer.addRecord(partitionKey, baseMessage + ": " + ii);
         }
 
-        while (writer.getUnsentRecords().size() > 0)
-        {
-            writer.send();
-            if (writer.getUnsentRecords().size() > 0)
-            {
-                Thread.sleep(250);
-            }
-        }
+        writer.sendAll(2000);
     }
 
     /**
@@ -337,15 +330,11 @@ public class TestKinesis
         assertTrue(writer.addRecord(messageBase.substring(0,  4), messageBase.substring(4)));
         assertTrue(writer.addRecord(messageBase.substring(0,  5), messageBase.substring(5)));
 
-        // TODO - replace by sendAll()
-        // note: while we can attempt to send 5 MB in a single message, we're limited to 1 MB
-        // written to a single shard, so will actually loop here trying to resend
-        int tryCount = 0;
-        while ((tryCount++ < 10) && (writer.getUnsentRecords().size() > 0))
-        {
-            writer.send();
-            Thread.sleep(1000);
-        }
+        // note: while we can attempt to send 5 MB in a single message, Kinesis will throttle
+        // us to 1 MB per shard, so this will actually result in multiple send attempts
+        
+        writer.sendAll(10000);
+        assertEquals("was able to send all records", 0, writer.getUnsentRecords().size());
 
         logger.debug("testLargeRecords: reading all messages");
         KinesisReader reader = new KinesisReader(client, streamName).readFromTrimHorizon();

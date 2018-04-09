@@ -183,16 +183,17 @@ public class KinesisWriter
 
 
     /**
-     *  Attempts to send the current batch, waiting for the response. Any batch-level
-     *  exceptions will be propagated to the caller, and you can assume that none of
-     *  the records were sent.
+     *  Attempts to send the current batch. This may or may not be successful: individual
+     *  records may be throttled, the entire batch may be throttled, or other exceptions
+     *  may occur. In the case of throttling or individual record errors, the call apears
+     *  to be successful; other exceptions are propagated to the caller. In either case,
+     *  unsent records are retained by the writer and may be resent.
      *  <p>
-     *  If the send is successful, individual records may have failed. These records are
-     *  preserved for a subsequent send attempt; all successfully-sent records are removed
-     *  from the batch.
-     *  <p>
-     *  After a send attempt you can call {@link #getSendResults} to return the status of
-     *  each record in the batch.
+     *  After sending, you may call {@link #getSendResults} to see the raw results from
+     *  Kinesis (this is useful if you need sequence numbers or want to examine error
+     *  messages). Note, however, that these responses correspond to the <em>original</em>
+     *  records sent; you must call {@link #getUnsentRecords} <em>before</em> sending
+     *  to correlate response with request.
      */
     public void send()
     {
@@ -259,6 +260,25 @@ public class KinesisWriter
             logger.warn("failed to send " + failureCounts.get(errorType)
                         + " records to " + streamName + " due to " + errorType
                         + " (sample message: " + failureDetail.get(errorType) + ")");
+        }
+    }
+
+
+    /**
+     *  Attempts to send the current batch of records, calling {@link #send} with a delay
+     *  until they're all sent or the passed timeout expires. Call {@link #getUnsentRecords}
+     *  to determine whether all records were successfully sent.
+     */
+    public void sendAll(long timeoutMillis)
+    {
+        long timeoutAt = System.currentTimeMillis() + timeoutMillis;
+        while ((unsentRecords.size() > 0) && (System.currentTimeMillis() < timeoutAt))
+        {
+            send();
+            if (unsentRecords.size() > 0)
+            {
+                CommonUtils.sleepQuietly(250);
+            }
         }
     }
 
