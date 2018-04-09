@@ -200,11 +200,16 @@ public class TestKinesisWriter
         assertEquals("after adding second record, number of unsent records", 2, writer.getUnsentRecords().size());
         assertEquals("after adding first record, size of unsent records",    18, writer.getUnsentRecordSize());
 
+        List<PutRecordsRequestEntry> recordsToSend = writer.getUnsentRecords();
+
         writer.send();
 
         assertEquals("after send, number of result entries", 2, writer.getSendResults().size());
         assertEquals("after send, number of unsent records", 0, writer.getUnsentRecords().size());
         assertEquals("after send, size of unsent records",   0, writer.getUnsentRecordSize());
+
+        assertSame("ordering of results: record 0", recordsToSend.get(0), writer.getSendResults().get(0).getRequestEntry());
+        assertSame("ordering of results: record 1", recordsToSend.get(1), writer.getSendResults().get(1).getRequestEntry());
     }
 
 
@@ -231,6 +236,8 @@ public class TestKinesisWriter
         assertEquals("after adding third record, number of unsent records",  3, writer.getUnsentRecords().size());
         assertEquals("after adding third record, size of unsent records",    24, writer.getUnsentRecordSize());
 
+        List<PutRecordsRequestEntry> recordsToSend = writer.getUnsentRecords();
+
         writer.send();
 
         assertEquals("after send, number of result entries", 3, writer.getSendResults().size());
@@ -238,6 +245,10 @@ public class TestKinesisWriter
         assertEquals("after send, size of unsent records",   7, writer.getUnsentRecordSize());
 
         assertLogMessage(Level.WARN, " 1 .*" + STREAM_NAME + ".*ProvisionedThroughputExceeded");
+
+        assertSame("ordering of results: record 0", recordsToSend.get(0), writer.getSendResults().get(0).getRequestEntry());
+        assertSame("ordering of results: record 1", recordsToSend.get(1), writer.getSendResults().get(1).getRequestEntry());
+        assertSame("ordering of results: record 2", recordsToSend.get(2), writer.getSendResults().get(2).getRequestEntry());
     }
 
 
@@ -264,7 +275,7 @@ public class TestKinesisWriter
 
         writer.send();
 
-        // we don't check result entries because it's unclear whether or not Kinesis would send them
+        assertEquals("after send, number of result records", 0, writer.getSendResults().size());
         assertEquals("after send, number of unsent records", 2, writer.getUnsentRecords().size());
         assertEquals("after send, size of unsent records",   13, writer.getUnsentRecordSize());
 
@@ -300,6 +311,7 @@ public class TestKinesisWriter
         }
         catch (ResourceNotFoundException ex)
         {
+            assertEquals("after send, number of result records", 0, writer.getSendResults().size());
             assertEquals("after send, number of unsent records", 2, writer.getUnsentRecords().size());
             assertEquals("after send, size of unsent records",   13, writer.getUnsentRecordSize());
         }
@@ -457,6 +469,7 @@ public class TestKinesisWriter
 
         writer.sendAll(2000);
 
-        assertEquals("unsent record count", 0, writer.getUnsentRecords().size());
+        assertEquals("result count",        14,     writer.getSendResults().size());
+        assertEquals("unsent record count", 0,      writer.getUnsentRecords().size());
     }
 }

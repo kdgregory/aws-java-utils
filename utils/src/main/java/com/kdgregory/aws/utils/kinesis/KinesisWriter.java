@@ -97,9 +97,9 @@ import com.kdgregory.aws.utils.CommonUtils;
  *      }
  *  }
  *
- *  while (writer.getUnsentRecords().size() > 0) {
- *      writer.send();
- *      Thread.sleep(1000);
+ *  writer.sendAll(10000);
+ *  if (writer.getUnsentRecords().size() > 0) {
+ *      throw new IllegalStateException("unsent messages left in writer");
  *  }
  *  </pre>
  */
@@ -108,6 +108,33 @@ public class KinesisWriter
     private final static int    MAX_RECORD_SIZE         = 1024 * 1024;
     private final static int    MAX_RECORDS_PER_REQUEST = 500;
     private final static int    MAX_REQUEST_SIZE        = 5 * 1024 * 1024;
+
+
+    /**
+     *  Holds an association between the request entry and its result. See
+     *  {@link #getSendResults} for more information.
+     */
+    public static class SendResult
+    {
+        private PutRecordsRequestEntry requestEntry;
+        private PutRecordsResultEntry resultEntry;
+
+        public SendResult(PutRecordsRequestEntry requestEntry, PutRecordsResultEntry resultEntry)
+        {
+            this.requestEntry = requestEntry;
+            this.resultEntry = resultEntry;
+        }
+
+        public PutRecordsRequestEntry getRequestEntry()
+        {
+            return requestEntry;
+        }
+
+        public PutRecordsResultEntry getResultEntry()
+        {
+            return resultEntry;
+        }
+    }
 
 //----------------------------------------------------------------------------
 //  Instance variables and constructor
@@ -123,7 +150,7 @@ public class KinesisWriter
     private List<PutRecordsRequestEntry> unsentRecords = new ArrayList<PutRecordsRequestEntry>();
     private int unsentRecordsSize = 0;
 
-    private List<PutRecordsResultEntry> lastSendResults = Collections.emptyList();
+    private List<SendResult> lastSendResults = Collections.emptyList();
 
 
     public KinesisWriter(AmazonKinesis client, String streamName)
@@ -203,13 +230,17 @@ public class KinesisWriter
             return;
         }
 
+        // this will prevent misinterpretation of results in case of exception
+        lastSendResults = Collections.emptyList();
+
         try
         {
             PutRecordsRequest request = new PutRecordsRequest()
                                         .withStreamName(streamName)
                                         .withRecords(unsentRecords);
             PutRecordsResult response = client.putRecords(request);
-            lastSendResults = response.getRecords();
+            populateSendResults(unsentRecords, response.getRecords());
+
         }
         catch (ProvisionedThroughputExceededException ex)
         {
@@ -217,69 +248,50 @@ public class KinesisWriter
             return;
         }
 
-        // we need to retain any individual records that failed; the easiest way to do
-        // this is just reset the record cache ... but we need to create an iterator
-        // on the old cache before doing that!
+        processResults();
 
-        Iterator<PutRecordsRequestEntry> requestEntryItx = unsentRecords.iterator();
-        clear();
-
-        int successCount = 0;
-        int failureCount = 0;
-        Map<String,Integer> failureCounts = new TreeMap<String,Integer>();
-        Map<String,String> failureDetail = new TreeMap<String,String>();
-
-        for (PutRecordsResultEntry resultEntry : lastSendResults)
-        {
-            PutRecordsRequestEntry requestEntry = requestEntryItx.next();
-            if ((resultEntry.getErrorCode() != null) && (resultEntry.getErrorCode().length() > 0))
-            {
-                failureCount++;
-                Integer count = failureCounts.get(resultEntry.getErrorCode());
-                count = (count != null)
-                      ? count + 1
-                      : Integer.valueOf(1);
-                failureCounts.put(resultEntry.getErrorCode(), count);
-                failureDetail.put(resultEntry.getErrorCode(), resultEntry.getErrorMessage());
-
-                addRecord(requestEntry.getPartitionKey(), requestEntry.getData().array());
-            }
-            else
-            {
-                successCount++;
-            }
-        }
-
-        if (logger.isDebugEnabled())
-        {
-            logger.debug("sent " + successCount + " of " + (successCount + failureCount) + " records to " + streamName);
-        }
-
-        for (String errorType : failureCounts.keySet())
-        {
-            logger.warn("failed to send " + failureCounts.get(errorType)
-                        + " records to " + streamName + " due to " + errorType
-                        + " (sample message: " + failureDetail.get(errorType) + ")");
-        }
     }
 
 
     /**
      *  Attempts to send the current batch of records, calling {@link #send} with a delay
-     *  until they're all sent or the passed timeout expires. Call {@link #getUnsentRecords}
-     *  to determine whether all records were successfully sent.
+     *  until they're all sent or the passed timeout expires. Timeout is silent; call
+     *  {@link #getUnsentRecords} to verify that all records were sent.
+     *  <p>
+     *  After calling this method, {@link #getSendResults} returns the concatentation of
+     *  all results from the individual sends. This will reflect the effect of potential
+     *  re-sends, so a source record may appear in the results multiple times and in
+     *  arbitrary order. The results, however, are still relevant with regard to sequence
+     *  numbers and error details.
+     *  <p>
+     *  If an exception is thrown by <code>send()</code> it will be propagated, but the
+     *  list of results will reflect what has already been done.
      */
     public void sendAll(long timeoutMillis)
     {
+        List<SendResult> aggregatedSendResults = new ArrayList<KinesisWriter.SendResult>();
+
         long timeoutAt = System.currentTimeMillis() + timeoutMillis;
         while ((unsentRecords.size() > 0) && (System.currentTimeMillis() < timeoutAt))
         {
-            send();
+            try
+            {
+                send();
+                aggregatedSendResults.addAll(lastSendResults);
+            }
+            catch (RuntimeException ex)
+            {
+                lastSendResults = aggregatedSendResults;
+                throw ex;
+            }
+
             if (unsentRecords.size() > 0)
             {
                 CommonUtils.sleepQuietly(250);
             }
         }
+
+        lastSendResults = aggregatedSendResults;
     }
 
 
@@ -296,8 +308,10 @@ public class KinesisWriter
 
 
     /**
-     *  Returns a list of all records currently in the batch. These are the actual records
-     *  to be sent, so any changes by the caller may cause operational errors.
+     *  Returns a list of all records currently in the batch.
+     *  <p>
+     *  <strong>Warning:</strong> These are the actual records to be sent, so any
+     *  changes by the caller may cause operational errors.
      */
     public List<PutRecordsRequestEntry> getUnsentRecords()
     {
@@ -306,7 +320,8 @@ public class KinesisWriter
 
 
     /**
-     *  Returns the calculated size of the current unsent records.
+     *  Returns the calculated size of the current unsent records. This is intended
+     *  for testing, but could be used for application-level logging.
      */
     public int getUnsentRecordSize()
     {
@@ -315,10 +330,15 @@ public class KinesisWriter
 
 
     /**
-     *  Returns a list containing the raw per-record results from the  last {@link #send}.
-     *  This can be used to check detailed error codes or sequence numbers.
+     *  Returns the per-record results of the last {@link #send} or {@link #sendAll}
+     *  call. Each entry in the returned list corresponds to one of the records from
+     *  the pre-send {@link #getUnsentRecords} list; the result can be used to extract
+     *  sequence numbers or detailed error information.
+     *  <p>
+     *  <strong>Warning:</strong> these results may contain records that were not sent;
+     *  changing those records may cause operational errors.
      */
-    public List<PutRecordsResultEntry> getSendResults()
+    public List<SendResult> getSendResults()
     {
         return lastSendResults;
     }
@@ -327,4 +347,79 @@ public class KinesisWriter
 //  Internals
 //----------------------------------------------------------------------------
 
+    /**
+     *  Builds the list of send results. Throws if there's a mismatch between
+     *  request and response lists, but leaves partial results.
+     */
+    private void populateSendResults(List<PutRecordsRequestEntry> requestEntries, List<PutRecordsResultEntry> resultEntries)
+    {
+        lastSendResults = new ArrayList<SendResult>(requestEntries.size());
+
+        Iterator<PutRecordsRequestEntry> requestItx = requestEntries.iterator();
+        Iterator<PutRecordsResultEntry> resultItx = resultEntries.iterator();
+
+        while (requestItx.hasNext())
+        {
+            if (! resultItx.hasNext())
+            {
+                throw new IllegalStateException("had fewer result entries than request entries; stream: " + streamName);
+            }
+            lastSendResults.add(new SendResult(requestItx.next(), resultItx.next()));
+        }
+
+        if (resultItx.hasNext())
+        {
+            throw new IllegalStateException("had more result entries than request entries; stream: " + streamName);
+        }
+    }
+
+
+    /**
+     *  Examines the results of the last send, retaining any records that weren't sent.
+     *  Logs a warning if any records weren't sent.
+     */
+    private void processResults()
+    {
+        // rather than duplicate code, we'll just reuse the addRecord() code, so must
+        // start by clearing the current list of unsent records
+        clear();
+
+        int successCount = 0;
+        int failureCount = 0;
+        Map<String,Integer> failureCountByCode = new TreeMap<String,Integer>();
+        Map<String,String> failureDetailByCode = new TreeMap<String,String>();
+
+        for (SendResult entry : lastSendResults)
+        {
+            String errorCode = entry.getResultEntry().getErrorCode();
+            if ((errorCode != null) && (errorCode.length() > 0))
+            {
+                failureCount++;
+                Integer count = failureCountByCode.get(errorCode);
+                count = (count != null)
+                      ? count + 1
+                      : Integer.valueOf(1);
+                failureCountByCode.put(errorCode, count);
+                failureDetailByCode.put(errorCode, entry.getResultEntry().getErrorMessage());
+
+                addRecord(entry.getRequestEntry().getPartitionKey(), entry.getRequestEntry().getData().array());
+            }
+            else
+            {
+                successCount++;
+            }
+        }
+
+        if (logger.isDebugEnabled())
+        {
+            logger.debug("sent " + successCount + " of " + (successCount + failureCount) + " records to " + streamName);
+        }
+
+        for (String errorType : failureCountByCode.keySet())
+        {
+            logger.warn("failed to send " + failureCountByCode.get(errorType)
+                        + " records to " + streamName + " due to " + errorType
+                        + " (sample message: " + failureDetailByCode.get(errorType) + ")");
+        }
+    }
 }
