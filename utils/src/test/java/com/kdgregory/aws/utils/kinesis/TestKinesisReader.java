@@ -14,7 +14,6 @@
 
 package com.kdgregory.aws.utils.kinesis;
 
-import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -139,22 +138,6 @@ public class TestKinesisReader
 
 
     /**
-     *  Uses reflection to extract the current shard iterators from the reader.
-     */
-    private Map<String,String> getShardIterators(KinesisReader reader)
-    throws Exception
-    {
-        Field fShardManager = reader.getClass().getDeclaredField("shardManager");
-        fShardManager.setAccessible(true);
-        Object shardManager = fShardManager.get(reader);
-
-        Field fShardIterators = shardManager.getClass().getDeclaredField("shardIterators");
-        fShardIterators.setAccessible(true);
-        return (Map<String,String>)fShardIterators.get(shardManager);
-    }
-
-
-    /**
      *  A mock class that supports just enough behavior to make the reader work.
      *  Construct with one or more lists of strings that represent the records
      *  in a shard.
@@ -165,6 +148,7 @@ public class TestKinesisReader
     public static class KinesisMock extends SelfMock<AmazonKinesis>
     {
         private String expectedStreamName;
+        private Map<String,Shard> shardsById = new HashMap<String,Shard>();
         private Map<String,List<Record>> recordsByShard = new HashMap<String,List<Record>>();
 
         public KinesisMock(String expectedStreamName, List<String>... contentToReturn)
@@ -185,6 +169,11 @@ public class TestKinesisReader
                 }
                 recordsByShard.put(shardId, records);
             }
+
+            for (Shard shard : createShards(recordsByShard.keySet()))
+            {
+                shardsById.put(shard.getShardId(), shard);
+            }
         }
 
         public DescribeStreamResult describeStream(DescribeStreamRequest request)
@@ -195,7 +184,7 @@ public class TestKinesisReader
                        .withStreamDescription(new StreamDescription()
                            .withStreamName(expectedStreamName)
                            .withStreamStatus(StreamStatus.ACTIVE)
-                           .withShards(createShards(recordsByShard.keySet()))
+                           .withShards(shardsById.values())
                            .withHasMoreShards(Boolean.FALSE));
         }
 
@@ -232,9 +221,11 @@ public class TestKinesisReader
             List<Record> shardRecords = recordsByShard.get(shardId);
             List<Record> remainingRecords = shardRecords.subList(offset, shardRecords.size());
             List<Record> returnedRecords = limitReturnedRecords(remainingRecords);
-            String nextShardItx = (offset + returnedRecords.size() == shardRecords.size())
-                                ? null
-                                : formatSequenceNumber(shardId, offset + returnedRecords.size());
+
+            // we only return a null shard iterator if the shard has been closed
+            String nextShardItx = formatSequenceNumber(shardId, offset + returnedRecords.size());
+            if (nextShardItx.equals(shardsById.get(shardId).getSequenceNumberRange().getEndingSequenceNumber()))
+                nextShardItx = null;
 
             return new GetRecordsResult()
                    .withRecords(returnedRecords)
@@ -319,8 +310,12 @@ public class TestKinesisReader
 
         KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).readFromTrimHorizon();
 
-        assertEquals("retrieved records", RECORDS_0, retrieveRecords(reader));
-        assertNull("at end of stream, iterator is null", getShardIterators(reader).get(SHARDID_0));
+        assertEquals("retrieved records",       RECORDS_0,
+                                                retrieveRecords(reader));
+        assertEquals("saved offsets, size",     1,
+                                                reader.getCurrentSequenceNumbers().size());
+        assertEquals("saved offsets, shard 0",  formatSequenceNumber(SHARDID_0, RECORDS_0.size() - 1),
+                                                reader.getCurrentSequenceNumbers().get(SHARDID_0));
     }
 
 
@@ -340,8 +335,12 @@ public class TestKinesisReader
 
         KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME);
 
-        assertEquals("retrieved records", Collections.emptyList(), retrieveRecords(reader));
-        assertNull("at end of stream, iterator is null", getShardIterators(reader).get(SHARDID_0));
+        // we don't retrieve any records, so we don't save any offsets
+
+        assertEquals("retrieved records",       Collections.emptyList(),
+                                                retrieveRecords(reader));
+        assertEquals("saved offsets, size",     0,
+                                                reader.getCurrentSequenceNumbers().size());
     }
 
 
@@ -367,11 +366,12 @@ public class TestKinesisReader
 
         KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).withInitialSequenceNumbers(offsets);
 
-        assertEquals("retrieved records",
-                     RECORDS_0.subList(1, RECORDS_0.size()),
-                     retrieveRecords(reader));
-
-        assertNull("at end of stream, iterator is null", getShardIterators(reader).get(SHARDID_0));
+        assertEquals("retrieved records",       RECORDS_0.subList(1, RECORDS_0.size()),
+                                                retrieveRecords(reader));
+        assertEquals("saved offsets, size",     1,
+                                                reader.getCurrentSequenceNumbers().size());
+        assertEquals("saved offsets, shard 0",  formatSequenceNumber(SHARDID_0, RECORDS_0.size() - 1),
+                                                reader.getCurrentSequenceNumbers().get(SHARDID_0));
     }
 
 
@@ -394,17 +394,17 @@ public class TestKinesisReader
 
         KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).readFromTrimHorizon();
 
-        assertEquals("first read",
-                     RECORDS_0.subList(0, 2),
-                     retrieveRecords(reader));
-        assertEquals("after first read, iterator has been updated",
-                     formatSequenceNumber(SHARDID_0, 2),
-                     getShardIterators(reader).get(SHARDID_0));
+        List<String> firstRead = retrieveRecords(reader);
+        assertEquals("first read, records",     RECORDS_0.subList(0, 2),
+                                                firstRead);
+        assertEquals("first read, offsets",     formatSequenceNumber(SHARDID_0, 1),
+                                                reader.getCurrentSequenceNumbers().get(SHARDID_0));
 
-        assertEquals("second read",
-                     RECORDS_0.subList(2, RECORDS_0.size()),
-                     retrieveRecords(reader));
-        assertNull("at end of stream, iterator is null", getShardIterators(reader).get(SHARDID_0));
+        List<String> secondRead = retrieveRecords(reader);
+        assertEquals("second read, records",    RECORDS_0.subList(2, RECORDS_0.size()),
+                                                secondRead);
+        assertEquals("second read, offsets",    formatSequenceNumber(SHARDID_0, RECORDS_0.size() - 1),
+                                                reader.getCurrentSequenceNumbers().get(SHARDID_0));
     }
 
 
@@ -417,8 +417,17 @@ public class TestKinesisReader
 
         KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).readFromTrimHorizon();
 
-        assertEquals("records from first read",     RECORDS_0,               retrieveRecords(reader));
-        assertEquals("records from second read",    Collections.emptyList(), retrieveRecords(reader));
+        List<String> firstRead = retrieveRecords(reader);
+        assertEquals("first read, records",     RECORDS_0,
+                                                firstRead);
+        assertEquals("first read, offsets",     formatSequenceNumber(SHARDID_0, RECORDS_0.size() - 1),
+                                                reader.getCurrentSequenceNumbers().get(SHARDID_0));
+
+        List<String> secondRead = retrieveRecords(reader);
+        assertEquals("second read, records",    Collections.emptyList(),
+                                                secondRead);
+        assertEquals("second read, offsets",    formatSequenceNumber(SHARDID_0, RECORDS_0.size() - 1),
+                                                reader.getCurrentSequenceNumbers().get(SHARDID_0));
     }
 
 
@@ -430,12 +439,14 @@ public class TestKinesisReader
         KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0, RECORDS_1);
         KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).readFromTrimHorizon();
 
-        assertEquals("retrieved records",
-                     CollectionUtil.combine(new ArrayList<String>(), RECORDS_0, RECORDS_1),
-                     retrieveRecords(reader));
-
-        assertNull("at end of streams, shard 0 iterator is null", getShardIterators(reader).get(SHARDID_0));
-        assertNull("at end of streams, shard 1 iterator is null", getShardIterators(reader).get(SHARDID_1));
+        assertEquals("retrieved records",       CollectionUtil.combine(new ArrayList<String>(), RECORDS_0, RECORDS_1),
+                                                retrieveRecords(reader));
+        assertEquals("saved offsets, size",     2,
+                                                reader.getCurrentSequenceNumbers().size());
+        assertEquals("saved offsets, shard 0",  formatSequenceNumber(SHARDID_0, RECORDS_0.size() - 1),
+                                                reader.getCurrentSequenceNumbers().get(SHARDID_0));
+        assertEquals("saved offsets, shard 1",  formatSequenceNumber(SHARDID_1, RECORDS_1.size() - 1),
+                                                reader.getCurrentSequenceNumbers().get(SHARDID_1));
     }
 
 
@@ -475,12 +486,16 @@ public class TestKinesisReader
 
         KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).withInitialSequenceNumbers(offsets);
 
-        assertEquals("retrieved records",
-                     CollectionUtil.combine(new ArrayList<String>(), RECORDS_0.subList(1, RECORDS_0.size()),
-                                                                     RECORDS_1.subList(1, RECORDS_1.size())),
-                     retrieveRecords(reader));
-        assertNull("at end of streams, shard 0 iterator is null", getShardIterators(reader).get(SHARDID_0));
-        assertNull("at end of streams, shard 1 iterator is null", getShardIterators(reader).get(SHARDID_1));
+        assertEquals("retrieved records",       CollectionUtil.combine(new ArrayList<String>(),
+                                                                       RECORDS_0.subList(1, RECORDS_0.size()),
+                                                                       RECORDS_1.subList(1, RECORDS_1.size())),
+                                                retrieveRecords(reader));
+        assertEquals("saved offsets, size",     2,
+                                                reader.getCurrentSequenceNumbers().size());
+        assertEquals("saved offsets, shard 0",  formatSequenceNumber(SHARDID_0, RECORDS_0.size() - 1),
+                                                reader.getCurrentSequenceNumbers().get(SHARDID_0));
+        assertEquals("saved offsets, shard 1",  formatSequenceNumber(SHARDID_1, RECORDS_1.size() - 1),
+                                                reader.getCurrentSequenceNumbers().get(SHARDID_1));
     }
 
 
@@ -522,8 +537,7 @@ public class TestKinesisReader
                                                                      RECORDS_1),
                      retrieveRecords(reader));
 
-        assertNull("at end of streams, shard 0 iterator is null", getShardIterators(reader).get(SHARDID_0));
-        assertNull("at end of streams, shard 1 iterator is null", getShardIterators(reader).get(SHARDID_1));
+        // at this point I believe that offsets will be updated
     }
 
 
@@ -562,7 +576,6 @@ public class TestKinesisReader
         assertNull("after first read, has no offsets for child",     reader.getCurrentSequenceNumbers().get(SHARDID_1));
 
         assertEquals("records from second read", RECORDS_1, retrieveRecords(reader));
-        assertNull("after second read, has no offsets for parent",  reader.getCurrentSequenceNumbers().get(SHARDID_0));
         assertNotNull("after second read, has offsets for child",   reader.getCurrentSequenceNumbers().get(SHARDID_1));
     }
 
@@ -755,7 +768,30 @@ public class TestKinesisReader
 
 
     @Test
-    public void testThrottling() throws Exception
+    public void testSavedOffsetsDontCorrespondToCurrentShards() throws Exception
+    {
+        myLogger.info("testSavedOffsetsDontCorrespondToCurrentShards");
+
+        KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0);
+
+        Map<String,String> offsets = new HashMap<String,String>();
+        offsets.put("bogus", "123");
+
+        KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME)
+                               .withInitialSequenceNumbers(offsets)
+                               .readFromTrimHorizon();
+
+        assertEquals("retrieved records",       RECORDS_0,
+                                                retrieveRecords(reader));
+        assertEquals("saved offsets, size",     1,
+                                                reader.getCurrentSequenceNumbers().size());
+        assertEquals("saved offsets, shard 0",  formatSequenceNumber(SHARDID_0, RECORDS_0.size() - 1),
+                                                reader.getCurrentSequenceNumbers().get(SHARDID_0));
+    }
+
+
+    @Test
+    public void testRecordThrottling() throws Exception
     {
         myLogger.info("testThrottling");
 
@@ -821,6 +857,40 @@ public class TestKinesisReader
 
 
     @Test
+    public void testTimeoutRetrievingShardDescription() throws Exception
+    {
+        myLogger.info("testTimeoutRetrievingShardDescription");
+
+        KinesisMock mock = new KinesisMock(STREAM_NAME, RECORDS_0, RECORDS_1, RECORDS_2)
+        {
+            @Override
+            public DescribeStreamResult describeStream(DescribeStreamRequest request)
+            {
+                throw new LimitExceededException("testing");
+            }
+        };
+
+        Map<String,String> offsets = new HashMap<String,String>();
+        offsets.put(SHARDID_0, formatSequenceNumber(SHARDID_0, 0));
+
+        KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME)
+                               .withInitialSequenceNumbers(offsets)
+                               .readFromTrimHorizon()
+                               .withTimeout(50);
+
+        List<String> firstRead = retrieveRecords(reader);
+        assertEquals("first read, records returned", Collections.emptyList(), firstRead);
+
+        List<String> secondRead = retrieveRecords(reader);
+        assertEquals("first read, records returned", Collections.emptyList(), secondRead);
+
+        assertEquals("offsets unchanged", offsets, reader.getCurrentSequenceNumbers());
+
+        assertLogMessages("unable to retrieve iterators log messages", "failed to retrieve shard description", 2, Level.WARN);
+    }
+
+
+    @Test
     public void testTimeoutRetrievingShardIterators() throws Exception
     {
         myLogger.info("testTimeoutRetrievingShardIterators");
@@ -834,7 +904,13 @@ public class TestKinesisReader
             }
         };
 
-        KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME).readFromTrimHorizon().withTimeout(50);
+        Map<String,String> offsets = new HashMap<String,String>();
+        offsets.put(SHARDID_0, formatSequenceNumber(SHARDID_0, 0));
+
+        KinesisReader reader = new KinesisReader(mock.getInstance(), STREAM_NAME)
+                               .withInitialSequenceNumbers(offsets)
+                               .readFromTrimHorizon()
+                               .withTimeout(50);
 
         List<String> firstRead = retrieveRecords(reader);
         assertEquals("first read, records returned", Collections.emptyList(), firstRead);
@@ -842,7 +918,9 @@ public class TestKinesisReader
         List<String> secondRead = retrieveRecords(reader);
         assertEquals("first read, records returned", Collections.emptyList(), secondRead);
 
-        assertLogMessages("unable to retrieve iterators log messages", "unable to retrieve shard iterators", 2, Level.WARN);
+        assertEquals("offsets unchanged", offsets, reader.getCurrentSequenceNumbers());
+
+        assertLogMessages("unable to retrieve iterators log messages", "failed to retrieve shard iterator", 2, Level.WARN);
     }
 
 

@@ -14,6 +14,7 @@
 
 package com.kdgregory.aws.utils.kinesis;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -56,9 +57,9 @@ import com.amazonaws.services.kinesis.model.*;
  *
  *  <h1> Sequence Numbers </h1>
  *
- *  To support applications that must start and stop, the reader retains the last
- *  sequence number read from each shard. You can retrieve the current set of
- *  sequence numbers with {@link #getCurrentSequenceNumbers()}, and use them to
+ *  To support applications that must start and stop, the reader retains the sequence
+ *  number for the last record read from each shard. You can retrieve the current set
+ *  of sequence numbers with {@link #getCurrentSequenceNumbers()}, and use them to
  *  configure a new reader via {@link #withInitialSequenceNumbers(Map)}.
  *  <p>
  *  When you configure a reader with initial sequence numbers, that changes the
@@ -79,6 +80,19 @@ import com.amazonaws.services.kinesis.model.*;
  *       the sibling is given a <code>TRIM_HORIZON</code> iterator. This covers
  *       the case where a reader was interrupted before it could make a pass of all
  *       shards.
+ *  </ul>
+ *  For simplicity, the reader does not purge sequence numbers when finished with a
+ *  shard. This avoids a situation where the application reads the last record from
+ *  a shard but does not start reading records from its children. When initialized
+ *  a sequence number from the end of a closed shard, it will automatically start
+ *  reading from the child(ren). As a result, you can simply upsert sequence numbers
+ *  to persist them; the reader will do the right thing.
+ *  <p>
+ *  The reader does, however, purge sequence numbers for expired shards (shards that
+ *  have been closed and whose records are older than the retention period). This is
+ *  only relevant if you frequently reshard the stream, and allows you to reduce the
+ *  storage required for sequence numbers (you can freely delete any saved numbers
+ *  that are not in the most recent call to {@link #getCurrentSequenceNumbers()}).
  *
  *  <h1> Error Handling and Timeouts </h1>
  *
@@ -149,18 +163,20 @@ implements Iterable<Record>
     private ShardIteratorType defaultIteratorType;
     private long timeout;
 
+    // these are populated by describeShards(), which is called when updating iterators
+    private List<Shard> shards;
+    private Map<String,Shard> shardsById;
+    private Map<String,List<Shard>> shardsByParentId;
+
     // while the javadoc says that shards are iterated in an arbitrary order, I
     // want a known order for testing; thus the internal maps are TreeMaps
-    private Map<String,String> offsets = new TreeMap<String,String>();
+    private Map<String,String> shardIterators = new TreeMap<String,String>();
 
-    // shard iterators are stored in the outer class and used by each succesive
-    // iterator so that we're not constantly retrieving shard descriptions
-    // (which increases potential for throttling)
-    private ShardManager shardManager = new ShardManager();
+    // we'll copy callers offsets if so desired
+    private Map<String,String> offsets = new TreeMap<String,String>();
 
     // this will contain the maximum value across all shards for current iteration
     private long millisBehindLatest;
-
 
 //----------------------------------------------------------------------------
 //  Constructor and Configuration Methods
@@ -180,7 +196,6 @@ implements Iterable<Record>
         this.streamName = streamName;
         this.timeout = 2500;
         this.defaultIteratorType = ShardIteratorType.LATEST;
-        this.offsets.putAll(offsets);
     }
 
 
@@ -207,7 +222,7 @@ implements Iterable<Record>
      */
     public KinesisReader withInitialSequenceNumbers(Map<String,String> value)
     {
-        this.offsets = value;
+        this.offsets.putAll(value);
         return this;
     }
 
@@ -253,10 +268,6 @@ implements Iterable<Record>
      */
     public Map<String,String> getCurrentSequenceNumbers()
     {
-        for (String parentId : shardManager.getParentIdsFrom(offsets.keySet()))
-        {
-            offsets.remove(parentId);
-        }
         return new TreeMap<String,String>(offsets);
     }
 
@@ -330,10 +341,19 @@ implements Iterable<Record>
 
         private void findNextShardWithRecords()
         {
-            // this happens on the first call for each new iterator
+            // this happens when the reader first starts, or if iterators were
+            // purged due to timeout
+            if (shardIterators.isEmpty())
+            {
+                retrieveInitialIterators();
+            }
+
+            // this happens on the first call for each new iterator; if we were
+            // unable to retrieve iterators the list will be empty and we'll be
+            // done before we start
             if (shardIds == null)
             {
-                shardIds = shardManager.getOrRetrieveShardIds();
+                shardIds = new LinkedList<String>(shardIterators.keySet());
             }
 
             while (currentRecords.isEmpty() && (! shardIds.isEmpty()))
@@ -346,18 +366,18 @@ implements Iterable<Record>
 
         private void readCurrentShard()
         {
-            if (logger.isDebugEnabled())
-            {
-                logger.debug("readCurrentShard: stream = " + streamName + ", shard = " + currentShardId);
-            }
-
-            String shardItx = shardManager.getIterator(currentShardId);
+            String shardItx = shardIterators.get(currentShardId);
             if (shardItx == null)
             {
                 // this will happen if the stream is resized under us; it can also
                 // happen if we reload iterators halfway through an iteration (due
                 // to iterator expiration)
                 return;
+            }
+
+            if (logger.isDebugEnabled())
+            {
+                logger.debug("readCurrentShard: stream = " + streamName + ", shard = " + currentShardId);
             }
 
             try
@@ -367,7 +387,11 @@ implements Iterable<Record>
                 millisBehindLatest = Math.max(millisBehindLatest, response.getMillisBehindLatest().longValue());
 
                 String nextShardIterator = response.getNextShardIterator();
-                shardManager.updateIterator(currentShardId, nextShardIterator);
+                shardIterators.put(currentShardId, nextShardIterator);
+                if (nextShardIterator == null)
+                {
+                    retrieveChildIterators(currentShardId);
+                }
             }
             catch (ProvisionedThroughputExceededException ex)
             {
@@ -376,240 +400,209 @@ implements Iterable<Record>
             catch (ExpiredIteratorException ex)
             {
                 logger.warn("iterator expired: stream = " + streamName + ", shard = " + currentShardId);
-                shardManager.retrieveInitialIterators();
+                retrieveInitialIterators();
             }
         }
     }
 
 
     /**
-     *  This class encapsulates shard iterator management. An instance is constructed
-     *  at the same time as the reader, but is not initialized until the first iterator
-     *  starts reading.
+     *  Updates the iterator for the specified shard. If passed a null iterator,
+     *  replaces the iterator with those of its children.
      */
-    protected class ShardManager
+    public void updateIterator(String shardId, String shardIterator)
     {
-        private List<Shard> shards;
-        private Map<String,List<Shard>> shardsByParentId;
-
-        private Map<String,String> shardIterators = new TreeMap<String,String>();
-
-
-        /**
-         *  Returns the iterator for the specified shard; may be null.
-         */
-        public String getIterator(String shardId)
+        if (shardIterator == null)
         {
-            return shardIterators.get(shardId);
+            // this method will remove the existing iterator if able to retrieve children
+            retrieveChildIterators(shardId);
+        }
+    }
+
+
+    /**
+     *  Reloads shard iterators based on current offsets / default iterator type. This
+     *  is called when the reader is first used, as well as for expired iterators. If
+     *  unable to retrieve shards, silently fails (will retrieve on next iterator).
+     */
+    private void retrieveInitialIterators()
+    {
+        if (logger.isDebugEnabled())
+        {
+            logger.debug("retrieveInitialIterators: stream = " + streamName + ", saved sequence numbers = " + offsets);
         }
 
+        shardIterators.clear();
 
-        /**
-         *  Updates the iterator for the specified shard. If passed a null iterator,
-         *  replaces the iterator with those of its children.
-         */
-        public void updateIterator(String shardId, String shardIterator)
+        long timeoutAt = System.currentTimeMillis() + timeout;
+        describeShards();
+        if (shards == null)
+            return;
+
+        // this purges any expired shards from the offsets
+        for (String shardId : new ArrayList<String>(offsets.keySet()))
         {
-            shardIterators.put(shardId, shardIterator);
-            if (shardIterator == null)
+            if (! shardsById.containsKey(shardId))
             {
-                // this method will remove the existing iterator if able to retrieve children
-                retrieveChildIterators(shardId);
+                offsets.remove(shardId);
             }
-
         }
 
-
-        /**
-         *  Returns a list of the current shard IDs. This will initialize the shards
-         *  if they are not already initialized. Caller owns the returned list.
-         */
-        public LinkedList<String> getOrRetrieveShardIds()
+        Map<String,ShardIteratorType> itxTypes = new HashMap<String,ShardIteratorType>();
+        if (! constructMixedIteratorTree(shardsByParentId.get(null), itxTypes))
         {
-            if (shardIterators.isEmpty())
-            {
-                retrieveInitialIterators();
-            }
-
-            // this should only happen if there's a timeout retrieving iterators
-            if (shardIterators.isEmpty())
-            {
-                logger.warn("unable to retrieve shard iterators: stream = " + streamName);
-            }
-
-            return new LinkedList<String>(shardIterators.keySet());
+            populateDefaultIterators(itxTypes);
         }
 
-
-        /**
-         *  Given a list of shard IDs, return the parent shard IDs. This is used to purge
-         *  the list of offsets.
-         */
-        public Set<String> getParentIdsFrom(Set<String> childIds)
+        if (logger.isDebugEnabled())
         {
-            Set<String> result = new HashSet<String>();
+            logger.debug("retrieveInitialIterators: stream = " + streamName + ", iterator types = " + itxTypes);
+        }
+
+        retrieveIterators(itxTypes, timeoutAt);
+    }
+
+
+    private boolean constructMixedIteratorTree(List<Shard> children, Map<String,ShardIteratorType> itxTypes)
+    {
+        if (children == null)
+            return false;
+
+        Set<String> childrenWithOffsets = new HashSet<String>();
+        for (Shard child : children)
+        {
+            String childShardId = child.getShardId();
+            if (constructMixedIteratorTree(shardsByParentId.get(childShardId), itxTypes))
+            {
+                childrenWithOffsets.add(childShardId);
+            }
+            else if (offsets.containsKey(childShardId))
+            {
+                itxTypes.put(childShardId, ShardIteratorType.AFTER_SEQUENCE_NUMBER);
+                childrenWithOffsets.add(childShardId);
+            }
+        }
+
+        if (childrenWithOffsets.size() == 0)
+            return false;
+
+        if (childrenWithOffsets.size() == children.size())
+            return true;
+
+        for (Shard child : children)
+        {
+            String childShardId = child.getShardId();
+            if (! childrenWithOffsets.contains(childShardId))
+            {
+                itxTypes.put(childShardId, ShardIteratorType.TRIM_HORIZON);
+            }
+        }
+        return true;
+    }
+
+
+    private void populateDefaultIterators(Map<String,ShardIteratorType> itxTypes)
+    {
+        if (defaultIteratorType == ShardIteratorType.TRIM_HORIZON)
+        {
+            for (Shard shard : shardsByParentId.get(null))
+            {
+                itxTypes.put(shard.getShardId(), defaultIteratorType);
+            }
+        }
+        else
+        {
             for (Shard shard : shards)
             {
-                if (childIds.contains(shard.getShardId()) && (shard.getParentShardId() != null))
-                    result.add(shard.getParentShardId());
-            }
-            return result;
-        }
-
-
-        /**
-         *  Reloads shard iterators based on current offsets / default iterator type. This
-         *  is called when the reader is first used, as well as for expired iterators.
-         */
-        public void retrieveInitialIterators()
-        {
-            if (logger.isDebugEnabled())
-            {
-                logger.debug("retrieveInitialIterators: stream = " + streamName + ", saved sequence numbers = " + offsets);
-            }
-
-            shardIterators.clear();
-
-            long timeoutAt = System.currentTimeMillis() + timeout;
-            describeShards();
-
-            Map<String,ShardIteratorType> itxTypes = new HashMap<String,ShardIteratorType>();
-            if (! constructMixedIteratorTree(shardsByParentId.get(null), itxTypes))
-            {
-                if (defaultIteratorType == ShardIteratorType.TRIM_HORIZON)
+                if (shardsByParentId.get(shard.getShardId()) == null)
                 {
-                    for (Shard shard : shardsByParentId.get(null))
-                    {
-                        itxTypes.put(shard.getShardId(), defaultIteratorType);
-                    }
-                }
-                else
-                {
-                    for (Shard shard : shards)
-                    {
-                        if (shardsByParentId.get(shard.getShardId()) == null)
-                        {
-                            itxTypes.put(shard.getShardId(), ShardIteratorType.LATEST);
-                        }
-                    }
+                    itxTypes.put(shard.getShardId(), ShardIteratorType.LATEST);
                 }
             }
+        }
+    }
 
-            if (logger.isDebugEnabled())
-            {
-                logger.debug("retrieveInitialIterators: stream = " + streamName + ", iterator types = " + itxTypes);
-            }
 
-            retrieveIterators(itxTypes, timeoutAt);
+    /**
+     *  Called when we reach the end of a parent shard, to load iterators for its
+     *  children. If unable to do so, will silently ignore
+     */
+    private void retrieveChildIterators(String parentShardId)
+    {
+        if (logger.isDebugEnabled())
+        {
+            logger.debug("retrieveChildIterators: stream = " + streamName + ", parentShardId = " + parentShardId);
         }
 
+        long timeoutAt = System.currentTimeMillis() + timeout;
+        describeShards();
+        if (shards == null)
+            return;
 
-        /**
-         *  Called when we reach the end of a parent shard, to load iterators for its children.
-         */
-        public void retrieveChildIterators(String parentShardId)
+        List<Shard> children = shardsByParentId.get(parentShardId);
+        if (children == null)
         {
-            if (logger.isDebugEnabled())
-            {
-                logger.debug("retrieveChildIterators: stream = " + streamName + ", parentShardId = " + parentShardId);
-            }
-
-            long timeoutAt = System.currentTimeMillis() + timeout;
-            describeShards();
-
-            List<Shard> children = shardsByParentId.get(parentShardId);
-            if (children == null)
-            {
-                logger.warn("retrieveChildIterators: did not find any children; stream = " + streamName + ", parentShardId = " + parentShardId);
-                return;
-            }
-
-            Map<String,ShardIteratorType> itxTypes = new TreeMap<String,ShardIteratorType>();
-            for (Shard shard : children)
-            {
-                itxTypes.put(shard.getShardId(), ShardIteratorType.TRIM_HORIZON);
-            }
-
-            if (retrieveIterators(itxTypes, timeoutAt))
-            {
-                shardIterators.remove(parentShardId);
-            }
+            logger.warn("retrieveChildIterators: did not find any children; stream = " + streamName + ", parentShardId = " + parentShardId);
+            return;
         }
 
-
-        private void describeShards()
+        Map<String,ShardIteratorType> itxTypes = new TreeMap<String,ShardIteratorType>();
+        for (Shard shard : children)
         {
-            shards = KinesisUtils.describeShards(client, streamName, timeout);
-            shardsByParentId = KinesisUtils.toMapByParentId(shards);
+            itxTypes.put(shard.getShardId(), ShardIteratorType.TRIM_HORIZON);
         }
 
-
-        /**
-         *  Retrieves a specific set of iterators (may not be all iterators belonging to
-         *  the shard). Returns <code>true</code> if able to do this, <code>false</code>
-         *  if the retrieve times-out.
-         */
-        private boolean retrieveIterators(Map<String,ShardIteratorType> iteratorTypes, long timeoutAt)
+        if (retrieveIterators(itxTypes, timeoutAt))
         {
-            // we store in a local map so that we don't apply a partial update to the master map
-            Map<String,String> result = new TreeMap<String,String>();
+            shardIterators.remove(parentShardId);
+        }
+    }
 
-            for (Map.Entry<String,ShardIteratorType> entry : iteratorTypes.entrySet())
+
+    private void describeShards()
+    {
+        shards = KinesisUtils.describeShards(client, streamName, timeout);
+        if (shards == null)
+        {
+            logger.warn("failed to retrieve shard description: stream = " + streamName);
+            return;
+        }
+
+        shardsById = KinesisUtils.toMapById(shards);
+        shardsByParentId = KinesisUtils.toMapByParentId(shards);
+    }
+
+
+    /**
+     *  Retrieves a iterators specific set of shards (maybe not all shards in stream) based on
+     *  the specified iterator types. Returns <code>true</code> if able to do this, <code>false</code>
+     *  if the retrieve times-out.
+     */
+    private boolean retrieveIterators(Map<String,ShardIteratorType> iteratorTypes, long timeoutAt)
+    {
+        // we store in a local map so that we don't apply a partial update to the master map
+        Map<String,String> result = new TreeMap<String,String>();
+
+        for (Map.Entry<String,ShardIteratorType> entry : iteratorTypes.entrySet())
+        {
+            String shardId = entry.getKey();
+            ShardIteratorType iteratorType = entry.getValue();
+            String offset = offsets.get(shardId);
+
+            long currentTimeout = timeoutAt - System.currentTimeMillis();
+            String shardIterator = (currentTimeout > 0)
+                                 ? KinesisUtils.retrieveShardIterator(client, streamName, shardId, iteratorType, offset, null, currentTimeout)
+                                 : null;
+            if (shardIterator == null)
             {
-                String shardId = entry.getKey();
-                ShardIteratorType iteratorType = entry.getValue();
-                String offset = offsets.get(shardId);
-                long currentTimeout = timeoutAt - System.currentTimeMillis();
-                if (currentTimeout < 0)
-                    return false;
-
-                String shardIterator = KinesisUtils.retrieveShardIterator(client, streamName, shardId, iteratorType, offset, null, currentTimeout);
-                if (currentTimeout < 0)
-                    return false;
-
-                result.put(shardId, shardIterator);
-            }
-
-            shardIterators.putAll(result);
-            return true;
-        }
-
-
-        private boolean constructMixedIteratorTree(List<Shard> children, Map<String,ShardIteratorType> itxTypes)
-        {
-            if (children == null)
+                logger.warn("failed to retrieve shard iterator: stream = " + streamName + ", shard = " + shardId);
                 return false;
-
-            Set<String> childrenWithOffsets = new HashSet<String>();
-            for (Shard child : children)
-            {
-                String childShardId = child.getShardId();
-                if (constructMixedIteratorTree(shardsByParentId.get(childShardId), itxTypes))
-                {
-                    childrenWithOffsets.add(childShardId);
-                }
-                else if (offsets.containsKey(childShardId))
-                {
-                    itxTypes.put(childShardId, ShardIteratorType.AFTER_SEQUENCE_NUMBER);
-                    childrenWithOffsets.add(childShardId);
-                }
             }
 
-            if (childrenWithOffsets.size() == 0)
-                return false;
-
-            if (childrenWithOffsets.size() == children.size())
-                return true;
-
-            for (Shard child : children)
-            {
-                String childShardId = child.getShardId();
-                if (! childrenWithOffsets.contains(childShardId))
-                {
-                    itxTypes.put(childShardId, ShardIteratorType.TRIM_HORIZON);
-                }
-            }
-            return true;
+            result.put(shardId, shardIterator);
         }
+
+        shardIterators.putAll(result);
+        return true;
     }
 }
