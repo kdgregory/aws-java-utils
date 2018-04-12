@@ -341,7 +341,7 @@ public class TestKinesisUtils
 
         assertEquals("status",              StreamStatus.ACTIVE, lastStatus);
         assertEquals("invocation count",    4, mock.describeInvocationCount.get());
-        assertApproximate("elapsed time",   400, elapsed, 10);
+        assertApproximate("elapsed time",   400, elapsed, 25);
     }
 
 

@@ -554,6 +554,11 @@ implements Iterable<Record>
 
         if (retrieveIterators(itxTypes, timeoutAt))
         {
+            if (logger.isDebugEnabled())
+            {
+                logger.debug("retrieveChildIterators: replacing shard with children; stream = " + streamName 
+                             + ", parentShardId = " + parentShardId + ", child shard IDs = " + itxTypes.keySet());
+            }
             shardIterators.remove(parentShardId);
         }
     }

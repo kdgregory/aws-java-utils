@@ -116,6 +116,30 @@ public class TestKinesis
         }
         return result;
     }
+    
+    
+    /**
+     *  Asserts that all open shards have been read and have saved sequence
+     *  numbers. Only works if records are distributed between shards.
+     */
+    private void assertSequenceNumbers(Map<String,String> savedSequenceNumbers, int expectedOpenShards)
+    {
+        int openShards = 0;
+        List<Shard> shards = KinesisUtils.describeShards(client, streamName, 1000);
+        for (Shard shard : shards)
+        {
+            String shardId = shard.getShardId();
+            if (shard.getSequenceNumberRange().getEndingSequenceNumber() == null)
+            {
+                openShards++;
+                String savedOffset = savedSequenceNumbers.get(shardId);
+                assertNotNull("saved sequence number for shard " + shardId, savedOffset);
+                assertTrue("saved offset in range of shard sequence numbers",
+                           savedOffset.compareTo(shard.getSequenceNumberRange().getStartingSequenceNumber()) >= 0);
+            }
+        }
+        assertEquals("expected number of open shards", expectedOpenShards, openShards);
+    }
 
 //----------------------------------------------------------------------------
 //  Testcases
@@ -152,11 +176,11 @@ public class TestKinesis
             StringAsserts.assertRegex("message text (was: " + text + ")", "ba[rz].*\\d", text);
         }
 
-        assertFalse("after read, offsets should not be empty", reader.getCurrentSequenceNumbers().isEmpty());
+        assertSequenceNumbers(reader.getCurrentSequenceNumbers(), 1);
 
         logger.debug("testBasicOperation: deleting stream");
         KinesisUtils.deleteStream(client, streamName, 1000);
-        assertNull("stream was deleted", KinesisUtils.waitForStatus(client, streamName, null, 60000));
+        assertNull("stream was deleted", KinesisUtils.waitForStatus(client, streamName, null, 300000));
     }
 
 
@@ -191,7 +215,7 @@ public class TestKinesis
         NumericAsserts.assertInRange("number of distinct partition keys", 18, 20, distinctPartitionKeys.size());
 
         Map<String,String> savedSequenceNumbers = reader.getCurrentSequenceNumbers();
-        assertEquals("saved sequence numbers indicates both shards read", 2, savedSequenceNumbers.size());
+        assertSequenceNumbers(savedSequenceNumbers, 2);
 
         logger.debug("testIncreaseShardCount: resharding stream");
         client.updateShardCount(new UpdateShardCountRequest().withStreamName(streamName)
@@ -203,13 +227,15 @@ public class TestKinesis
         assertEquals("number of messages written/read during reshard", 10, secondBatch.size());
 
         logger.debug("testIncreaseShardCount: waiting for reshard to complete");
-        assertEquals("stream became active", StreamStatus.ACTIVE, KinesisUtils.waitForStatus(client, streamName, StreamStatus.ACTIVE, 180000));
+        assertEquals("stream became active", StreamStatus.ACTIVE, KinesisUtils.waitForStatus(client, streamName, StreamStatus.ACTIVE, 300000));
 
         logger.debug("testIncreaseShardCount: writing and reading last batch of messages");
         writeMessages(null, "final", 10);
         List<Record> thirdBatch = readMessages(reader, 10);
+        
         assertEquals("number of messages written/read after reshard", 10, thirdBatch.size());
-        assertEquals("final offsets correspond to new shard count", 3, reader.getCurrentSequenceNumbers().size());
+        
+        assertSequenceNumbers(reader.getCurrentSequenceNumbers(), 3);
 
         logger.debug("testIncreaseShardCount: second reader, reading entire stream");
         KinesisReader reader2 = new KinesisReader(client, streamName).readFromTrimHorizon();
@@ -229,7 +255,7 @@ public class TestKinesis
 
         logger.debug("testIncreaseShardCount: deleting stream");
         KinesisUtils.deleteStream(client, streamName, 1000);
-        assertNull("stream was deleted", KinesisUtils.waitForStatus(client, streamName, null, 60000));
+        assertNull("stream was deleted", KinesisUtils.waitForStatus(client, streamName, null, 300000));
     }
 
 
@@ -264,7 +290,7 @@ public class TestKinesis
         NumericAsserts.assertInRange("number of distinct partition keys", 18, 20, distinctPartitionKeys.size());
 
         Map<String,String> savedSequenceNumbers = reader.getCurrentSequenceNumbers();
-        assertEquals("saved sequence numbers indicates all shards read", 3, savedSequenceNumbers.size());
+        assertSequenceNumbers(savedSequenceNumbers, 3);
 
         logger.debug("testDecreaseShardCount: resharding stream");
         client.updateShardCount(new UpdateShardCountRequest().withStreamName(streamName)
@@ -276,15 +302,14 @@ public class TestKinesis
         assertEquals("number of messages written/read during reshard", 10, secondBatch.size());
 
         logger.debug("testDecreaseShardCount: waiting for reshard to complete");
-        assertEquals("stream became active", StreamStatus.ACTIVE, KinesisUtils.waitForStatus(client, streamName, StreamStatus.ACTIVE, 180000));
+        assertEquals("stream became active", StreamStatus.ACTIVE, KinesisUtils.waitForStatus(client, streamName, StreamStatus.ACTIVE, 300000));
 
         logger.debug("testDecreaseShardCount: writing and reading last batch of messages");
         writeMessages(null, "final", 10);
         List<Record> thirdBatch = readMessages(reader, 10);
+        
         assertEquals("number of messages written/read after reshard", 10, thirdBatch.size());
-
-        // TODO - this fails because we don't remove shard 2 (it's not an ancestor of a resulting shard)
-        // assertEquals("final offsets correspond to new shard count", 2, reader.getCurrentSequenceNumbers().size());
+        assertSequenceNumbers(reader.getCurrentSequenceNumbers(), 2);
 
         logger.debug("testDecreaseShardCount: second reader, reading entire stream");
         KinesisReader reader2 = new KinesisReader(client, streamName).readFromTrimHorizon();
@@ -304,7 +329,7 @@ public class TestKinesis
 
         logger.debug("testDecreaseShardCount: deleting stream");
         KinesisUtils.deleteStream(client, streamName, 1000);
-        assertNull("stream was deleted", KinesisUtils.waitForStatus(client, streamName, null, 60000));
+        assertNull("stream was deleted", KinesisUtils.waitForStatus(client, streamName, null, 300000));
     }
 
 
@@ -350,6 +375,6 @@ public class TestKinesis
 
         logger.debug("testLargeRecords: deleting stream");
         KinesisUtils.deleteStream(client, streamName, 1000);
-        assertNull("stream was deleted", KinesisUtils.waitForStatus(client, streamName, null, 60000));
+        assertNull("stream was deleted", KinesisUtils.waitForStatus(client, streamName, null, 300000));
     }
 }

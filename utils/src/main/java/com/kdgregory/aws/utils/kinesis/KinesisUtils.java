@@ -156,7 +156,10 @@ public class KinesisUtils
         {
             StreamDescription description = describeStream(client, request, remainingTimeout);
             lastStatus = getStatus(description);
-            if (lastStatus == desiredStatus) break;
+            if (lastStatus == desiredStatus)
+            {
+                return lastStatus;
+            }
 
             // sleep to avoid throttling
             CommonUtils.sleepQuietly(100);
