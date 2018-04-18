@@ -121,14 +121,17 @@ public class KinesisUtils
             long currentTimeout = timeoutAt - System.currentTimeMillis();
             DescribeStreamRequest request = new DescribeStreamRequest().withStreamName(streamName);
             if (lastShardId != null) request.setExclusiveStartShardId(lastShardId);
+
             StreamDescription description = describeStream(client, request, currentTimeout);
             if (description == null) return null;
+
             List<Shard> shards = description.getShards();
             result.addAll(shards);
             lastShardId = description.getHasMoreShards()
                         ? shards.get(shards.size() - 1).getShardId()
                         : null;
         } while (lastShardId != null);
+
         return result;
     }
 
@@ -149,11 +152,11 @@ public class KinesisUtils
     {
         StreamStatus lastStatus = null;
         long timeoutAt = System.currentTimeMillis() + timeout;
-        long remainingTimeout = 0;
         DescribeStreamRequest request = new DescribeStreamRequest().withStreamName(streamName);
 
-        while ((remainingTimeout = timeoutAt - System.currentTimeMillis()) > 0)
+        while (System.currentTimeMillis() < timeoutAt)
         {
+            long remainingTimeout = timeoutAt - System.currentTimeMillis();
             StreamDescription description = describeStream(client, request, remainingTimeout);
             lastStatus = getStatus(description);
             if (lastStatus == desiredStatus)
@@ -161,7 +164,7 @@ public class KinesisUtils
                 return lastStatus;
             }
 
-            // sleep to avoid throttling
+            // arbitrary sleep to minimize throttling
             CommonUtils.sleepQuietly(100);
         }
 

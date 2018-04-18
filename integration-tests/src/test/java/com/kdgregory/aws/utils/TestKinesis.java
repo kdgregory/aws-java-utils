@@ -19,17 +19,18 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
+import net.sf.kdgcommons.collections.CollectionUtil;
 import net.sf.kdgcommons.lang.StringUtil;
 import net.sf.kdgcommons.test.NumericAsserts;
-import net.sf.kdgcommons.test.StringAsserts;
 
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.AmazonKinesisClientBuilder;
@@ -54,23 +55,90 @@ public class TestKinesis
     private Log logger = LogFactory.getLog(getClass());
 
     private AmazonKinesis client;
+
     private String streamName;
+
+
+//----------------------------------------------------------------------------
+//  Common setup/teardown
+//----------------------------------------------------------------------------
+
+    @Before
+    public void setUp() throws Exception
+    {
+        client = AmazonKinesisClientBuilder.defaultClient();
+    }
+
+
+    @After
+    public void tearDown() throws Exception
+    {
+        // nothing here (yet)
+    }
 
 //----------------------------------------------------------------------------
 //  Helpers
 //----------------------------------------------------------------------------
 
     /**
+     *  Attempts to reshard the stream, waiting until it has become active again
+     *  and has the desired number of open shards.
+     *  <p>
+     *  Returns the status of the stream, <code>null</code> if the timeout is
+     *  reached before we could determine that the stream has been resharded (the
+     *  caller should then wait until the stream is active and check shard count).
+     *  <p>
+     *  Any exceptions from the reshard operation are propagated. These exceptions
+     *  (eg: <code>ResourceNotFoundException</code>) generally indicate a non-retryable
+     *  condition.
+     */
+    public static StreamStatus reshard(AmazonKinesis client, String streamName, int numberOfShards, long timeout)
+    {
+        long timeoutAt = System.currentTimeMillis() + timeout;
+
+        client.updateShardCount(new UpdateShardCountRequest()
+                                .withStreamName(streamName)
+                                .withTargetShardCount(numberOfShards)
+                                .withScalingType(ScalingType.UNIFORM_SCALING));
+
+        while (System.currentTimeMillis() < timeoutAt)
+        {
+            StreamStatus lastStatus = KinesisUtils.waitForStatus(client, streamName, StreamStatus.ACTIVE, timeoutAt - System.currentTimeMillis());
+            if (lastStatus == null)
+                break;
+
+            List<Shard> shards = KinesisUtils.describeShards(client, streamName, timeoutAt - System.currentTimeMillis());
+            if (shards == null)
+                break;
+
+            int openShards = 0;
+            for (Shard shard : shards)
+            {
+                if (shard.getSequenceNumberRange().getEndingSequenceNumber() == null)
+                {
+                    openShards++;
+                }
+            }
+
+            if (openShards == numberOfShards)
+                return StreamStatus.ACTIVE;
+        }
+
+        return null;
+    }
+
+
+    /**
      *  Writes a set of messages to the stream. Assumes that all messages can
      *  be sent in a single batch.
      */
-    private void writeMessages(String partitionKey, String baseMessage, int count)
+    private void writeMessages(String partitionKey, String message, int count)
     throws Exception
     {
         KinesisWriter writer = new KinesisWriter(client, streamName);
         for (int ii = 0 ; ii < count ; ii++)
         {
-            writer.addRecord(partitionKey, baseMessage + ": " + ii);
+            writer.addRecord(partitionKey, message);
         }
 
         writer.sendAll(2000);
@@ -116,30 +184,35 @@ public class TestKinesis
         }
         return result;
     }
-    
-    
+
+
     /**
-     *  Asserts that all open shards have been read and have saved sequence
-     *  numbers. Only works if records are distributed between shards.
+     *  Asserts that a batch of messages contains the expected text values and expected
+     *  number of partition keys (represented as a range to account for possible
+     *  duplication of random keys).
      */
-    private void assertSequenceNumbers(Map<String,String> savedSequenceNumbers, int expectedOpenShards)
+    private void assertRecords(
+        String baseMessage, List<Record> records,
+        int expectedRecordCount, int expectedMinPartitionKeys, int expectedMaxPartitionKeys,
+        Set<String> expectedMessages)
+    throws Exception
     {
-        int openShards = 0;
-        List<Shard> shards = KinesisUtils.describeShards(client, streamName, 1000);
-        for (Shard shard : shards)
+        assertEquals(baseMessage + ": record count", expectedRecordCount, records.size());
+
+        Set<String> partitionKeys = new HashSet<String>();
+        Set<String> messages = new HashSet<String>();
+        for (Record record : records)
         {
-            String shardId = shard.getShardId();
-            if (shard.getSequenceNumberRange().getEndingSequenceNumber() == null)
-            {
-                openShards++;
-                String savedOffset = savedSequenceNumbers.get(shardId);
-                assertNotNull("saved sequence number for shard " + shardId, savedOffset);
-                assertTrue("saved offset in range of shard sequence numbers",
-                           savedOffset.compareTo(shard.getSequenceNumberRange().getStartingSequenceNumber()) >= 0);
-            }
+            partitionKeys.add(record.getPartitionKey());
+            messages.add(new String(BinaryUtils.copyBytesFrom(record.getData()), "UTF-8"));
         }
-        assertEquals("expected number of open shards", expectedOpenShards, openShards);
+
+        NumericAsserts.assertInRange(baseMessage + ": number of distinct partition keys",
+                                     expectedMinPartitionKeys, expectedMaxPartitionKeys,
+                                     partitionKeys.size());
+        assertEquals(baseMessage + ": message contents", expectedMessages, messages);
     }
+
 
 //----------------------------------------------------------------------------
 //  Testcases
@@ -150,7 +223,6 @@ public class TestKinesis
     {
         logger.info("testBasicOperation");
 
-        client = AmazonKinesisClientBuilder.defaultClient();
         streamName = "TestKinesis-testBasicOperation";
 
         logger.debug("testBasicOperation: creating stream");
@@ -160,23 +232,17 @@ public class TestKinesis
         StreamDescription streamDesc = KinesisUtils.describeStream(client, describeRequest, 2000);
         assertEquals("stream status after creation", StreamStatus.ACTIVE, KinesisUtils.getStatus(streamDesc));
 
-        logger.debug("testBasicOperation: writing messages in two batches");
+        logger.debug("testBasicOperation: writing messages in several batches");
+        writeMessages("foo", "bar", 10);
+        writeMessages("foo", "baz", 10);
         writeMessages("foo", "bar", 10);
         writeMessages("foo", "baz", 10);
 
         logger.debug("testBasicOperation: reading all messages");
         KinesisReader reader = new KinesisReader(client, streamName).readFromTrimHorizon();
-        List<Record> records = readMessages(reader, 20);
+        List<Record> records = readMessages(reader, 41);    // this should time-out but read all messages
 
-        assertEquals("number of messages read", 20, records.size());
-        for (Record record : records)
-        {
-            String text = new String(BinaryUtils.copyBytesFrom(record.getData()), "UTF-8");
-            assertEquals("partition key", "foo", record.getPartitionKey());
-            StringAsserts.assertRegex("message text (was: " + text + ")", "ba[rz].*\\d", text);
-        }
-
-        assertSequenceNumbers(reader.getCurrentSequenceNumbers(), 1);
+        assertRecords("all messages", records, 40, 1, 1, CollectionUtil.asSet("bar", "baz"));
 
         logger.debug("testBasicOperation: deleting stream");
         KinesisUtils.deleteStream(client, streamName, 1000);
@@ -189,69 +255,46 @@ public class TestKinesis
     {
         logger.info("testIncreaseShardCount");
 
-        client = AmazonKinesisClientBuilder.defaultClient();
         streamName = "TestKinesis-testIncreaseShardCount";
 
         logger.debug("testIncreaseShardCount: creating stream");
         KinesisUtils.createStream(client, streamName, 2, 60000);
 
-        logger.debug("testIncreaseShardCount: writing initial batches of messages");
+        logger.debug("testIncreaseShardCount: writing and reading initial batches of messages");
         writeMessages(null, "init 1", 10);
         writeMessages(null, "init 2", 10);
+        writeMessages(null, "init 3", 10);
 
-        logger.debug("testIncreaseShardCount: reading initial messages");
         KinesisReader reader = new KinesisReader(client, streamName).readFromTrimHorizon();
+        List<Record> initialBatch = readMessages(reader, 30);
 
-        List<Record> initialBatch = readMessages(reader, 20);
-        assertEquals("initial batch, number of messages read", 20, initialBatch.size());
-
-        Set<String> distinctPartitionKeys = new HashSet<String>();
-        for (Record record : initialBatch)
-        {
-            distinctPartitionKeys.add(record.getPartitionKey());
-            String text = new String(BinaryUtils.copyBytesFrom(record.getData()), "UTF-8");
-            StringAsserts.assertRegex("message text (was: " + text + ")", "init.*\\d", text);
-        }
-        NumericAsserts.assertInRange("number of distinct partition keys", 18, 20, distinctPartitionKeys.size());
+        assertRecords("initial batch", initialBatch, 30, 28, 30, CollectionUtil.asSet("init 1", "init 2", "init 3"));
 
         Map<String,String> savedSequenceNumbers = reader.getCurrentSequenceNumbers();
-        assertSequenceNumbers(savedSequenceNumbers, 2);
 
         logger.debug("testIncreaseShardCount: resharding stream");
-        client.updateShardCount(new UpdateShardCountRequest().withStreamName(streamName)
-                                .withTargetShardCount(3).withScalingType(ScalingType.UNIFORM_SCALING));
+        StreamStatus reshardStatus = reshard(client, streamName, 3, 300000);
+        assertEquals("reshard successful", StreamStatus.ACTIVE, reshardStatus);
 
-        logger.debug("testIncreaseShardCount: writing and reading messages while stream is being resharded");
-        writeMessages(null, "middle", 10);
-        List<Record> secondBatch = readMessages(reader, 10);
-        assertEquals("number of messages written/read during reshard", 10, secondBatch.size());
+        logger.debug("testIncreaseShardCount: writing and reading final batches of messages");
+        writeMessages(null, "final 1", 10);
+        writeMessages(null, "final 2", 10);
+        writeMessages(null, "final 3", 10);
 
-        logger.debug("testIncreaseShardCount: waiting for reshard to complete");
-        assertEquals("stream became active", StreamStatus.ACTIVE, KinesisUtils.waitForStatus(client, streamName, StreamStatus.ACTIVE, 300000));
+        List<Record> finalBatch = readMessages(reader, 30);
+        assertRecords("final batch", finalBatch, 30, 28, 30, CollectionUtil.asSet("final 1", "final 2", "final 3"));
 
-        logger.debug("testIncreaseShardCount: writing and reading last batch of messages");
-        writeMessages(null, "final", 10);
-        List<Record> thirdBatch = readMessages(reader, 10);
-        
-        assertEquals("number of messages written/read after reshard", 10, thirdBatch.size());
-        
-        assertSequenceNumbers(reader.getCurrentSequenceNumbers(), 3);
+        logger.debug("testIncreaseShardCount: second reader, from saved sequence numbers");
+        KinesisReader reader2 = new KinesisReader(client, streamName).withInitialSequenceNumbers(savedSequenceNumbers);
+        assertRecords("secondreader", readMessages(reader2, 60),
+                      30, 28, 30,
+                      CollectionUtil.asSet("final 1", "final 2", "final 3"));
 
-        logger.debug("testIncreaseShardCount: second reader, reading entire stream");
-        KinesisReader reader2 = new KinesisReader(client, streamName).readFromTrimHorizon();
-        List<Record> reader2Messages = readMessages(reader2, 40);
-
-        assertEquals("reader2 read entire stream", 40, reader2Messages.size());
-        assertEquals("reader2 read same messages as reader1",
-                     new TreeSet<String>(extractText(initialBatch, secondBatch, thirdBatch)),
-                     new TreeSet<String>(extractText(reader2Messages)));
-
-        logger.debug("testIncreaseShardCount: third reader, reading from saved offsets");
-        KinesisReader reader3 = new KinesisReader(client, streamName).withInitialSequenceNumbers(savedSequenceNumbers);
-        List<Record> reader3Messages = readMessages(reader3, 20);
-        assertEquals("reader3 read messages not read by reader1",
-                     new TreeSet<String>(extractText(secondBatch, thirdBatch)),
-                     new TreeSet<String>(extractText(reader3Messages)));
+        logger.debug("testIncreaseShardCount: third reader, reading entire stream");
+        KinesisReader reader3 = new KinesisReader(client, streamName).readFromTrimHorizon();
+        assertRecords("third reader", readMessages(reader3, 60),
+                      60, 56, 60,
+                      CollectionUtil.asSet("init 1", "init 2", "init 3", "final 1", "final 2", "final 3"));
 
         logger.debug("testIncreaseShardCount: deleting stream");
         KinesisUtils.deleteStream(client, streamName, 1000);
@@ -264,68 +307,46 @@ public class TestKinesis
     {
         logger.info("testDecreaseShardCount");
 
-        client = AmazonKinesisClientBuilder.defaultClient();
         streamName = "TestKinesis-testDecreaseShardCount";
 
         logger.debug("testDecreaseShardCount: creating stream");
         KinesisUtils.createStream(client, streamName, 3, 60000);
 
-        logger.debug("testDecreaseShardCount: writing initial batches of messages");
+        logger.debug("testDecreaseShardCount: writing and reading initial batches of messages");
         writeMessages(null, "init 1", 10);
         writeMessages(null, "init 2", 10);
+        writeMessages(null, "init 3", 10);
 
-        logger.debug("testDecreaseShardCount: reading initial messages");
         KinesisReader reader = new KinesisReader(client, streamName).readFromTrimHorizon();
+        List<Record> initialBatch = readMessages(reader, 30);
 
-        List<Record> initialBatch = readMessages(reader, 20);
-        assertEquals("initial batch, number of messages read", 20, initialBatch.size());
-
-        Set<String> distinctPartitionKeys = new HashSet<String>();
-        for (Record record : initialBatch)
-        {
-            distinctPartitionKeys.add(record.getPartitionKey());
-            String text = new String(BinaryUtils.copyBytesFrom(record.getData()), "UTF-8");
-            StringAsserts.assertRegex("message text (was: " + text + ")", "init.*\\d", text);
-        }
-        NumericAsserts.assertInRange("number of distinct partition keys", 18, 20, distinctPartitionKeys.size());
+        assertRecords("initial batch", initialBatch, 30, 28, 30, CollectionUtil.asSet("init 1", "init 2", "init 3"));
 
         Map<String,String> savedSequenceNumbers = reader.getCurrentSequenceNumbers();
-        assertSequenceNumbers(savedSequenceNumbers, 3);
 
         logger.debug("testDecreaseShardCount: resharding stream");
-        client.updateShardCount(new UpdateShardCountRequest().withStreamName(streamName)
-                                .withTargetShardCount(2).withScalingType(ScalingType.UNIFORM_SCALING));
+        StreamStatus reshardStatus = reshard(client, streamName, 2, 300000);
+        assertEquals("reshard successful", StreamStatus.ACTIVE, reshardStatus);
 
-        logger.debug("testDecreaseShardCount: writing and reading messages while stream is being resharded");
-        writeMessages(null, "middle", 10);
-        List<Record> secondBatch = readMessages(reader, 10);
-        assertEquals("number of messages written/read during reshard", 10, secondBatch.size());
+        logger.debug("testDecreaseShardCount: writing and reading final batches of messages");
+        writeMessages(null, "final 1", 10);
+        writeMessages(null, "final 2", 10);
+        writeMessages(null, "final 3", 10);
 
-        logger.debug("testDecreaseShardCount: waiting for reshard to complete");
-        assertEquals("stream became active", StreamStatus.ACTIVE, KinesisUtils.waitForStatus(client, streamName, StreamStatus.ACTIVE, 300000));
+        List<Record> finalBatch = readMessages(reader, 30);
+        assertRecords("final batch", finalBatch, 30, 28, 30, CollectionUtil.asSet("final 1", "final 2", "final 3"));
 
-        logger.debug("testDecreaseShardCount: writing and reading last batch of messages");
-        writeMessages(null, "final", 10);
-        List<Record> thirdBatch = readMessages(reader, 10);
-        
-        assertEquals("number of messages written/read after reshard", 10, thirdBatch.size());
-        assertSequenceNumbers(reader.getCurrentSequenceNumbers(), 2);
+        logger.debug("testDecreaseShardCount: second reader, from saved sequence numbers");
+        KinesisReader reader2 = new KinesisReader(client, streamName).withInitialSequenceNumbers(savedSequenceNumbers);
+        assertRecords("secondreader", readMessages(reader2, 60),
+                      30, 28, 30,
+                      CollectionUtil.asSet("final 1", "final 2", "final 3"));
 
-        logger.debug("testDecreaseShardCount: second reader, reading entire stream");
-        KinesisReader reader2 = new KinesisReader(client, streamName).readFromTrimHorizon();
-        List<Record> reader2Messages = readMessages(reader2, 40);
-
-        assertEquals("reader2 read entire stream", 40, reader2Messages.size());
-        assertEquals("reader2 read same messages as reader1",
-                     new TreeSet<String>(extractText(initialBatch, secondBatch, thirdBatch)),
-                     new TreeSet<String>(extractText(reader2Messages)));
-
-        logger.debug("testDecreaseShardCount: third reader, reading from saved offsets");
-        KinesisReader reader3 = new KinesisReader(client, streamName).withInitialSequenceNumbers(savedSequenceNumbers);
-        List<Record> reader3Messages = readMessages(reader3, 20);
-        assertEquals("reader3 read messages not read by reader1",
-                     new TreeSet<String>(extractText(secondBatch, thirdBatch)),
-                     new TreeSet<String>(extractText(reader3Messages)));
+        logger.debug("testDecreaseShardCount: third reader, reading entire stream");
+        KinesisReader reader3 = new KinesisReader(client, streamName).readFromTrimHorizon();
+        assertRecords("third reader", readMessages(reader3, 60),
+                      60, 56, 60,
+                      CollectionUtil.asSet("init 1", "init 2", "init 3", "final 1", "final 2", "final 3"));
 
         logger.debug("testDecreaseShardCount: deleting stream");
         KinesisUtils.deleteStream(client, streamName, 1000);
@@ -338,7 +359,6 @@ public class TestKinesis
     {
         logger.info("testLargeRecords");
 
-        client = AmazonKinesisClientBuilder.defaultClient();
         streamName = "TestKinesis-testLargeRecords";
 
         logger.debug("testLargeRecords: creating stream");
@@ -357,7 +377,7 @@ public class TestKinesis
 
         // note: while we can attempt to send 5 MB in a single message, Kinesis will throttle
         // us to 1 MB per shard, so this will actually result in multiple send attempts
-        
+
         writer.sendAll(10000);
         assertEquals("was able to send all records", 0, writer.getUnsentRecords().size());
 
