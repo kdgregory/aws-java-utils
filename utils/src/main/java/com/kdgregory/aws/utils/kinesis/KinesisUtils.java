@@ -360,6 +360,81 @@ public class KinesisUtils
         return waitForStatus(client, streamName, StreamStatus.ACTIVE, (timeoutAt - System.currentTimeMillis()));
     }
 
+    /**
+     *  Changes the number of shards in a stream, waits for it to become active again,
+     *  and verifies that it has the expected number of open shards.
+     *  <p>
+     *  The AWS docs note that intermediate shards may be created as part of a reshard
+     *  operation. In my experience, the stream may be marked as ACTIVE before the final
+     *  shards have been created, thus the need to verify the number of open shards (this
+     *  is, in my opinion, rather hacky, but seems to work).
+     *  <p>
+     *  Unlike other functions in this class, there is no attempt to retry as a result
+     *  of throttling: AWS imposes daily limits on stream reshards, so any attempt to
+     *  retry the operation is likely to result in a timeout. Caller should be prepared
+     *  for exceptions, particularly <code>LimitExceededException</code>.
+     *  <p>
+     *  Requires minimum AWS SDK version 1.11.55.
+     *
+     *  @param  client          The AWS client used to make requests.
+     *  @param  streamName      The name of the stream.
+     *  @param  numberOfShards  The desired number of shards. Per AWS documentation, the
+     *                          reshard operation is most efficient if the new number of
+     *                          is twice or half the current number of shards.
+     *  @param  timeout         Milliseconds that this function will wait for the stream
+     *                          to become active and the shard count to stabilize.
+     *
+     *  @return StreamStatus.ACTIVE to indicate that the reshard completed and the number
+     *          of shards were verified, <code>null</code> to indicate that the timout
+     *          expired before this happened (this return type is used for consistency
+     *          with other functions; the actual information returned is boolean in nature).
+     */
+    public static StreamStatus reshard(
+        AmazonKinesis client, String streamName, int numberOfShards, long timeout)
+    {
+        long timeoutAt = System.currentTimeMillis() + timeout;
+
+        if (logger.isDebugEnabled())
+        {
+            logger.debug("reshard: streamName = " + streamName + ", numberOfShards = " + numberOfShards);
+        }
+
+        client.updateShardCount(new UpdateShardCountRequest()
+                                .withStreamName(streamName)
+                                .withTargetShardCount(numberOfShards)
+                                .withScalingType(ScalingType.UNIFORM_SCALING));
+        if (logger.isDebugEnabled())
+        {
+            logger.debug("reshard: waiting for completion; streamName = " + streamName);
+        }
+
+        while (System.currentTimeMillis() < timeoutAt)
+        {
+            StreamStatus lastStatus = KinesisUtils.waitForStatus(client, streamName, StreamStatus.ACTIVE, timeoutAt - System.currentTimeMillis());
+            if (lastStatus == null)
+                break;
+
+            List<Shard> shards = KinesisUtils.describeShards(client, streamName, timeoutAt - System.currentTimeMillis());
+            if (shards == null)
+                break;
+
+            int openShards = 0;
+            for (Shard shard : shards)
+            {
+                if (shard.getSequenceNumberRange().getEndingSequenceNumber() == null)
+                {
+                    openShards++;
+                }
+            }
+
+            if (openShards == numberOfShards)
+                return StreamStatus.ACTIVE;
+        }
+
+        logger.warn("reshard: timed out waiting for stream to stabilize; streamName = " + streamName);
+        return null;
+    }
+
 
     /**
      *  Retrieves a single shard iterator, retrying until a caller-specified timeout.

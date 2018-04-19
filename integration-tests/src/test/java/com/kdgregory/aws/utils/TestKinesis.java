@@ -81,54 +81,6 @@ public class TestKinesis
 //----------------------------------------------------------------------------
 
     /**
-     *  Attempts to reshard the stream, waiting until it has become active again
-     *  and has the desired number of open shards.
-     *  <p>
-     *  Returns the status of the stream, <code>null</code> if the timeout is
-     *  reached before we could determine that the stream has been resharded (the
-     *  caller should then wait until the stream is active and check shard count).
-     *  <p>
-     *  Any exceptions from the reshard operation are propagated. These exceptions
-     *  (eg: <code>ResourceNotFoundException</code>) generally indicate a non-retryable
-     *  condition.
-     */
-    public static StreamStatus reshard(AmazonKinesis client, String streamName, int numberOfShards, long timeout)
-    {
-        long timeoutAt = System.currentTimeMillis() + timeout;
-
-        client.updateShardCount(new UpdateShardCountRequest()
-                                .withStreamName(streamName)
-                                .withTargetShardCount(numberOfShards)
-                                .withScalingType(ScalingType.UNIFORM_SCALING));
-
-        while (System.currentTimeMillis() < timeoutAt)
-        {
-            StreamStatus lastStatus = KinesisUtils.waitForStatus(client, streamName, StreamStatus.ACTIVE, timeoutAt - System.currentTimeMillis());
-            if (lastStatus == null)
-                break;
-
-            List<Shard> shards = KinesisUtils.describeShards(client, streamName, timeoutAt - System.currentTimeMillis());
-            if (shards == null)
-                break;
-
-            int openShards = 0;
-            for (Shard shard : shards)
-            {
-                if (shard.getSequenceNumberRange().getEndingSequenceNumber() == null)
-                {
-                    openShards++;
-                }
-            }
-
-            if (openShards == numberOfShards)
-                return StreamStatus.ACTIVE;
-        }
-
-        return null;
-    }
-
-
-    /**
      *  Writes a set of messages to the stream. Assumes that all messages can
      *  be sent in a single batch.
      */
@@ -223,7 +175,7 @@ public class TestKinesis
     {
         logger.info("testBasicOperation");
 
-        streamName = "TestKinesis-testBasicOperation";
+        streamName = "TestKinesis-testBasicOperation-1123";
 
         logger.debug("testBasicOperation: creating stream");
         KinesisUtils.createStream(client, streamName, 1, 30000);
@@ -255,7 +207,7 @@ public class TestKinesis
     {
         logger.info("testIncreaseShardCount");
 
-        streamName = "TestKinesis-testIncreaseShardCount";
+        streamName = "TestKinesis-testIncreaseShardCount-1123";
 
         logger.debug("testIncreaseShardCount: creating stream");
         KinesisUtils.createStream(client, streamName, 2, 60000);
@@ -273,7 +225,7 @@ public class TestKinesis
         Map<String,String> savedSequenceNumbers = reader.getCurrentSequenceNumbers();
 
         logger.debug("testIncreaseShardCount: resharding stream");
-        StreamStatus reshardStatus = reshard(client, streamName, 3, 300000);
+        StreamStatus reshardStatus = KinesisUtils.reshard(client, streamName, 3, 300000);
         assertEquals("reshard successful", StreamStatus.ACTIVE, reshardStatus);
 
         logger.debug("testIncreaseShardCount: writing and reading final batches of messages");
@@ -307,7 +259,7 @@ public class TestKinesis
     {
         logger.info("testDecreaseShardCount");
 
-        streamName = "TestKinesis-testDecreaseShardCount";
+        streamName = "TestKinesis-testDecreaseShardCount-1123";
 
         logger.debug("testDecreaseShardCount: creating stream");
         KinesisUtils.createStream(client, streamName, 3, 60000);
@@ -325,7 +277,7 @@ public class TestKinesis
         Map<String,String> savedSequenceNumbers = reader.getCurrentSequenceNumbers();
 
         logger.debug("testDecreaseShardCount: resharding stream");
-        StreamStatus reshardStatus = reshard(client, streamName, 2, 300000);
+        StreamStatus reshardStatus = KinesisUtils.reshard(client, streamName, 2, 300000);
         assertEquals("reshard successful", StreamStatus.ACTIVE, reshardStatus);
 
         logger.debug("testDecreaseShardCount: writing and reading final batches of messages");
@@ -359,7 +311,7 @@ public class TestKinesis
     {
         logger.info("testLargeRecords");
 
-        streamName = "TestKinesis-testLargeRecords";
+        streamName = "TestKinesis-testLargeRecords-1123";
 
         logger.debug("testLargeRecords: creating stream");
         KinesisUtils.createStream(client, streamName, 1, 30000);

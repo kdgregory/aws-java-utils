@@ -17,14 +17,22 @@ package com.kdgregory.aws.utils.kinesis;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
+import org.apache.log4j.AppenderSkeleton;
+import org.apache.log4j.Level;
+import org.apache.log4j.Logger;
+import org.apache.log4j.spi.LoggingEvent;
+
 import net.sf.kdgcommons.collections.CollectionUtil;
+import net.sf.kdgcommons.test.NumericAsserts;
 import net.sf.kdgcommons.test.SelfMock;
 import static net.sf.kdgcommons.test.NumericAsserts.*;
 
@@ -37,11 +45,46 @@ import com.amazonaws.services.kinesis.model.*;
  */
 public class TestKinesisUtils
 {
+    private LinkedList<LoggingEvent> loggingEvents = new LinkedList<LoggingEvent>();
+
+//----------------------------------------------------------------------------
+//  Common setup
+//----------------------------------------------------------------------------
+
+    @Before
+    public void setUp()
+    {
+        Logger utilsLogger = Logger.getLogger(KinesisUtils.class);
+        utilsLogger.setLevel(Level.DEBUG);
+        utilsLogger.addAppender(new AppenderSkeleton()
+        {
+            @Override
+            public void close()
+            {
+                // no-op
+            }
+
+            @Override
+            public boolean requiresLayout()
+            {
+                return false;
+            }
+
+            @Override
+            protected void append(LoggingEvent event)
+            {
+                loggingEvents.add(event);
+            }
+        });
+    }
+
 //----------------------------------------------------------------------------
 //  Sample data -- only populated with fields that we actually use
 //----------------------------------------------------------------------------
 
     private static final Date NOW = new Date();
+
+    public final static String STREAM_NAME = "TestKinesisUtils";
 
     private static final List<Shard> SHARDS_1 = Arrays.asList(
                                         new Shard().withShardId("0001"),
@@ -66,8 +109,8 @@ public class TestKinesisUtils
     {
         public AtomicInteger describeInvocationCount = new AtomicInteger(0);
 
-        private String expectedStreamName;
-        private Object[] statuses;
+        protected String expectedStreamName;
+        protected Object[] statuses;
 
         public StreamDescriberMock(String expectedStreamName, Object... statuses)
         {
@@ -79,9 +122,10 @@ public class TestKinesisUtils
         @SuppressWarnings("unused")
         public DescribeStreamResult describeStream(DescribeStreamRequest request)
         {
+            int idx = describeInvocationCount.getAndIncrement();
+
             assertEquals("request contains stream name", expectedStreamName, request.getStreamName());
 
-            int idx = describeInvocationCount.getAndIncrement();
             Object retval = (idx < statuses.length) ? statuses[idx] : statuses[statuses.length - 1];
             if (retval == ResourceNotFoundException.class)
             {
@@ -93,9 +137,14 @@ public class TestKinesisUtils
             }
             else
             {
+                // note: the base description leaves the shard list null, to fail tests that don't
+                // configure needed shards
+
                 StreamDescription description = new StreamDescription()
                         .withStreamName(request.getStreamName())
-                        .withStreamStatus((StreamStatus)retval);
+                        .withStreamStatus((StreamStatus)retval)
+                        .withHasMoreShards(Boolean.FALSE);
+
                 addToDescription(request, description);
                 return new DescribeStreamResult().withStreamDescription(description);
             }
@@ -174,7 +223,7 @@ public class TestKinesisUtils
     @Test
     public void testDescribeShardsSingleRetrieve() throws Exception
     {
-        StreamDescriberMock mock = new StreamDescriberMock("example", StreamStatus.ACTIVE)
+        StreamDescriberMock mock = new StreamDescriberMock(STREAM_NAME, StreamStatus.ACTIVE)
         {
             @Override
             protected void addToDescription(DescribeStreamRequest request, StreamDescription description)
@@ -184,7 +233,7 @@ public class TestKinesisUtils
         };
         AmazonKinesis client = mock.getInstance();
 
-        List<Shard> shards = KinesisUtils.describeShards(client, "example", 1000);
+        List<Shard> shards = KinesisUtils.describeShards(client, STREAM_NAME, 1000);
         assertEquals("invocation count",        1, mock.describeInvocationCount.get());
         assertEquals("returned expected list",  SHARDS_1, shards);
     }
@@ -193,7 +242,7 @@ public class TestKinesisUtils
     @Test
     public void testDescribeShardsMultiRetrieve() throws Exception
     {
-        StreamDescriberMock mock = new StreamDescriberMock("example", StreamStatus.ACTIVE)
+        StreamDescriberMock mock = new StreamDescriberMock(STREAM_NAME, StreamStatus.ACTIVE)
         {
             @Override
             protected void addToDescription(DescribeStreamRequest request, StreamDescription description)
@@ -210,7 +259,7 @@ public class TestKinesisUtils
         };
         AmazonKinesis client = mock.getInstance();
 
-        List<Shard> shards = KinesisUtils.describeShards(client, "example", 1000);
+        List<Shard> shards = KinesisUtils.describeShards(client, STREAM_NAME, 1000);
         assertEquals("invocation count",        2, mock.describeInvocationCount.get());
         assertEquals("returned expected list",  CollectionUtil.combine(new ArrayList<Shard>(), SHARDS_1, SHARDS_2), shards);
     }
@@ -219,10 +268,10 @@ public class TestKinesisUtils
     @Test
     public void testDescribeShardsStreamNotAvailable() throws Exception
     {
-        AmazonKinesis client = new StreamDescriberMock("example", ResourceNotFoundException.class)
+        AmazonKinesis client = new StreamDescriberMock(STREAM_NAME, ResourceNotFoundException.class)
                                .getInstance();
 
-        List<Shard> shards = KinesisUtils.describeShards(client, "example", 1000);
+        List<Shard> shards = KinesisUtils.describeShards(client, STREAM_NAME, 1000);
         assertEquals("returned empty", null, shards);
     }
 
@@ -292,11 +341,11 @@ public class TestKinesisUtils
     @Test
     public void testWaitForStatusNormalOperation()
     {
-        StreamDescriberMock mock = new StreamDescriberMock("example", StreamStatus.CREATING, StreamStatus.CREATING, StreamStatus.ACTIVE);
+        StreamDescriberMock mock = new StreamDescriberMock(STREAM_NAME, StreamStatus.CREATING, StreamStatus.CREATING, StreamStatus.ACTIVE);
         AmazonKinesis client = mock.getInstance();
 
         long start = System.currentTimeMillis();
-        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, "example", StreamStatus.ACTIVE, 500);
+        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, STREAM_NAME, StreamStatus.ACTIVE, 500);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("status",              StreamStatus.ACTIVE, lastStatus);
@@ -308,11 +357,11 @@ public class TestKinesisUtils
     @Test
     public void testWaitForStatusTimeout()
     {
-        StreamDescriberMock mock = new StreamDescriberMock("example", StreamStatus.CREATING);
+        StreamDescriberMock mock = new StreamDescriberMock(STREAM_NAME, StreamStatus.CREATING);
         AmazonKinesis client = mock.getInstance();
 
         long start = System.currentTimeMillis();
-        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, "example", StreamStatus.ACTIVE, 250);
+        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, STREAM_NAME, StreamStatus.ACTIVE, 250);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("status",              StreamStatus.CREATING, lastStatus);
@@ -324,7 +373,7 @@ public class TestKinesisUtils
     @Test
     public void testWaitForStatusWithThrottling()
     {
-        StreamDescriberMock mock = new StreamDescriberMock("example",
+        StreamDescriberMock mock = new StreamDescriberMock(STREAM_NAME,
                                                            LimitExceededException.class, LimitExceededException.class,
                                                            StreamStatus.CREATING, StreamStatus.ACTIVE);
         AmazonKinesis client = mock.getInstance();
@@ -336,7 +385,7 @@ public class TestKinesisUtils
         //  - return active, no sleep
 
         long start = System.currentTimeMillis();
-        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, "example", StreamStatus.ACTIVE, 500);
+        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, STREAM_NAME, StreamStatus.ACTIVE, 500);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("status",              StreamStatus.ACTIVE, lastStatus);
@@ -350,13 +399,13 @@ public class TestKinesisUtils
     {
         final AtomicInteger createInvocationCount = new AtomicInteger(0);
 
-        StreamDescriberMock mock = new StreamDescriberMock("example", ResourceNotFoundException.class, StreamStatus.CREATING, StreamStatus.ACTIVE)
+        StreamDescriberMock mock = new StreamDescriberMock(STREAM_NAME, ResourceNotFoundException.class, StreamStatus.CREATING, StreamStatus.ACTIVE)
         {
             @SuppressWarnings("unused")
             public CreateStreamResult createStream(CreateStreamRequest request)
             {
-                assertEquals("stream name passed to createStream", "example", request.getStreamName());
-                assertEquals("shard count passed to createStream", 3,         request.getShardCount().intValue());
+                assertEquals("stream name passed to createStream", STREAM_NAME, request.getStreamName());
+                assertEquals("shard count passed to createStream", 3,           request.getShardCount().intValue());
                 createInvocationCount.incrementAndGet();
                 return new CreateStreamResult();
             }
@@ -369,7 +418,7 @@ public class TestKinesisUtils
         //  - active, no sleep
 
         long start = System.currentTimeMillis();
-        StreamStatus status = KinesisUtils.createStream(client, "example", 3, 1000L);
+        StreamStatus status = KinesisUtils.createStream(client, STREAM_NAME, 3, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("stream status",                   StreamStatus.ACTIVE, status);
@@ -384,7 +433,7 @@ public class TestKinesisUtils
     {
         final AtomicInteger createInvocationCount = new AtomicInteger(0);
 
-        StreamDescriberMock mock = new StreamDescriberMock("example", StreamStatus.ACTIVE)
+        StreamDescriberMock mock = new StreamDescriberMock(STREAM_NAME, StreamStatus.ACTIVE)
         {
             @SuppressWarnings("unused")
             public CreateStreamResult createStream(CreateStreamRequest request)
@@ -403,7 +452,7 @@ public class TestKinesisUtils
         //  - success
 
         long start = System.currentTimeMillis();
-        StreamStatus status = KinesisUtils.createStream(client, "example", 3, 1000L);
+        StreamStatus status = KinesisUtils.createStream(client, STREAM_NAME, 3, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("stream status",                               StreamStatus.ACTIVE, status);
@@ -418,7 +467,7 @@ public class TestKinesisUtils
     {
         final AtomicInteger createInvocationCount = new AtomicInteger(0);
 
-        StreamDescriberMock mock = new StreamDescriberMock("example", StreamStatus.ACTIVE)
+        StreamDescriberMock mock = new StreamDescriberMock(STREAM_NAME, StreamStatus.ACTIVE)
         {
             @SuppressWarnings("unused")
             public CreateStreamResult createStream(CreateStreamRequest request)
@@ -429,7 +478,7 @@ public class TestKinesisUtils
         };
         AmazonKinesis client = mock.getInstance();
 
-        StreamStatus status = KinesisUtils.createStream(client, "example", 3, 500L);
+        StreamStatus status = KinesisUtils.createStream(client, STREAM_NAME, 3, 500L);
 
         assertEquals("stream status",                               StreamStatus.ACTIVE, status);
         assertEquals("invocations of createStream",                 1, createInvocationCount.get());
@@ -448,12 +497,12 @@ public class TestKinesisUtils
             public DeleteStreamResult deleteStream(DeleteStreamRequest request)
             {
                 invocationCount.getAndIncrement();
-                assertEquals("stream name passed in request", "example", request.getStreamName());
+                assertEquals("stream name passed in request", STREAM_NAME, request.getStreamName());
                 return new DeleteStreamResult();
             }
         }.getInstance();
 
-        boolean status = KinesisUtils.deleteStream(client, "example", 500L);
+        boolean status = KinesisUtils.deleteStream(client, STREAM_NAME, 500L);
 
         assertTrue("returned status indicates success",         status);
         assertEquals("invocations of deleteStream",             1, invocationCount.get());
@@ -480,7 +529,7 @@ public class TestKinesisUtils
         //  - throttled, sleep for 200 ms
 
         long start = System.currentTimeMillis();
-        boolean status = KinesisUtils.deleteStream(client, "example", 250L);
+        boolean status = KinesisUtils.deleteStream(client, STREAM_NAME, 250L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertFalse("returned status indicates failure",        status);
@@ -504,7 +553,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        boolean status = KinesisUtils.deleteStream(client, "example", 250L);
+        boolean status = KinesisUtils.deleteStream(client, STREAM_NAME, 250L);
 
         assertFalse("returned status indicates failure",        status);
         assertEquals("invocations of deleteStream",             1, invocationCount.get());
@@ -521,7 +570,7 @@ public class TestKinesisUtils
         //  - updating, sleep for 100 ms
         //  - active
 
-        RetentionPeriodMock mock = new RetentionPeriodMock("example", 24, 36, StreamStatus.ACTIVE, StreamStatus.ACTIVE, StreamStatus.UPDATING, StreamStatus.ACTIVE)
+        RetentionPeriodMock mock = new RetentionPeriodMock(STREAM_NAME, 24, 36, StreamStatus.ACTIVE, StreamStatus.ACTIVE, StreamStatus.UPDATING, StreamStatus.ACTIVE)
         {
             @Override
             protected void decreaseStreamRetentionPeriodInternal(DecreaseStreamRetentionPeriodRequest request)
@@ -533,7 +582,7 @@ public class TestKinesisUtils
         AmazonKinesis client = mock.getInstance();
 
         long start = System.currentTimeMillis();
-        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, "example", 36, 1000L);
+        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
@@ -563,7 +612,7 @@ public class TestKinesisUtils
         //  - try to increase retention, success
         //  - active
 
-        RetentionPeriodMock mock = new RetentionPeriodMock("example", 24, 36, StreamStatus.ACTIVE)
+        RetentionPeriodMock mock = new RetentionPeriodMock(STREAM_NAME, 24, 36, StreamStatus.ACTIVE)
         {
             @Override
             protected void increaseStreamRetentionPeriodInternal(IncreaseStreamRetentionPeriodRequest request)
@@ -579,7 +628,7 @@ public class TestKinesisUtils
 
         AmazonKinesis client = mock.getInstance();
         long start = System.currentTimeMillis();
-        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, "example", 36, 1000L);
+        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
@@ -607,7 +656,7 @@ public class TestKinesisUtils
         //  - try to decrease retention, success
         //  - wait for status
 
-        RetentionPeriodMock mock = new RetentionPeriodMock("example", 24, 36, StreamStatus.ACTIVE)
+        RetentionPeriodMock mock = new RetentionPeriodMock(STREAM_NAME, 24, 36, StreamStatus.ACTIVE)
         {
             @Override
             protected void increaseStreamRetentionPeriodInternal(IncreaseStreamRetentionPeriodRequest request)
@@ -629,7 +678,7 @@ public class TestKinesisUtils
         AmazonKinesis client = mock.getInstance();
 
         long start = System.currentTimeMillis();
-        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, "example", 36, 1000L);
+        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
@@ -654,7 +703,7 @@ public class TestKinesisUtils
         //  - initial describe
         //  - try to increase retention, throws ResourceNotFoundException, stop trying
 
-        RetentionPeriodMock mock = new RetentionPeriodMock("example", 24, 36, StreamStatus.ACTIVE)
+        RetentionPeriodMock mock = new RetentionPeriodMock(STREAM_NAME, 24, 36, StreamStatus.ACTIVE)
         {
             @Override
             protected void increaseStreamRetentionPeriodInternal(IncreaseStreamRetentionPeriodRequest request)
@@ -665,7 +714,7 @@ public class TestKinesisUtils
 
         AmazonKinesis client = mock.getInstance();
 
-        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, "example", 36, 1000L);
+        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
 
         assertEquals("final stream status",                             null, status);
         assertEquals("invocations of describeStream",                   2,  mock.describeInvocationCount.get());
@@ -687,7 +736,7 @@ public class TestKinesisUtils
         //  - updating, sleep for 100 ms
         //  - active
 
-        RetentionPeriodMock mock = new RetentionPeriodMock("example", 48, 36, StreamStatus.ACTIVE, StreamStatus.ACTIVE, StreamStatus.UPDATING, StreamStatus.ACTIVE)
+        RetentionPeriodMock mock = new RetentionPeriodMock(STREAM_NAME, 48, 36, StreamStatus.ACTIVE, StreamStatus.ACTIVE, StreamStatus.UPDATING, StreamStatus.ACTIVE)
         {
             @Override
             protected void increaseStreamRetentionPeriodInternal(IncreaseStreamRetentionPeriodRequest request)
@@ -699,7 +748,7 @@ public class TestKinesisUtils
         AmazonKinesis client = mock.getInstance();
 
         long start = System.currentTimeMillis();
-        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, "example", 36, 1000L);
+        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
@@ -712,14 +761,143 @@ public class TestKinesisUtils
 
 
     @Test
+    public void testReshardHappyPath() throws Exception
+    {
+        final AtomicInteger updateShardCountInvocationCount = new AtomicInteger(0);
+
+        StreamDescriberMock mock = new StreamDescriberMock(STREAM_NAME, StreamStatus.UPDATING, StreamStatus.ACTIVE)
+        {
+            private int activeShards = 1;
+            private List<Shard> shards = Arrays.asList(
+                new Shard().withShardId("shard-000")
+                           .withSequenceNumberRange(new SequenceNumberRange().withStartingSequenceNumber("00001")),
+                new Shard().withShardId("shard-001")
+                           .withSequenceNumberRange(new SequenceNumberRange().withStartingSequenceNumber("00011")),
+                new Shard().withShardId("shard-002")
+                           .withSequenceNumberRange(new SequenceNumberRange().withStartingSequenceNumber("00011")));
+
+            @SuppressWarnings("unused")
+            public UpdateShardCountResult updateShardCount(UpdateShardCountRequest request)
+            {
+                updateShardCountInvocationCount.incrementAndGet();
+
+                assertEquals("expected stream name", expectedStreamName, request.getStreamName());
+                assertEquals("expected shard count", 2, request.getTargetShardCount().intValue());
+                assertEquals("scaling type", ScalingType.UNIFORM_SCALING.toString(), request.getScalingType());
+
+                activeShards = request.getTargetShardCount().intValue();
+                if (activeShards > 0)
+                {
+                    shards.get(0).getSequenceNumberRange().withEndingSequenceNumber("00010");
+                }
+                // whitebox: we ignore the response so don't need to set anything here
+                return new UpdateShardCountResult();
+            }
+
+            @Override
+            protected void addToDescription(DescribeStreamRequest request, StreamDescription description)
+            {
+                if (activeShards == 1)
+                    description.setShards(shards.subList(0, 1));
+                else
+                    description.setShards(shards);
+            }
+        };
+
+        AmazonKinesis client = mock.getInstance();
+        StreamStatus status = KinesisUtils.reshard(client, STREAM_NAME, 2, 1000);
+
+        assertEquals("returned status",             StreamStatus.ACTIVE, status);
+        assertEquals("update invocation count",     1, updateShardCountInvocationCount.get());
+        // first describe gets UPDATING, second gets ACTIVE, third gets shards
+        assertEquals("describe invocation count",   3, mock.describeInvocationCount.get());
+    }
+
+
+    @Test
+    public void testReshardStatusTimout() throws Exception
+    {
+        final AtomicInteger updateShardCountInvocationCount = new AtomicInteger(0);
+
+        StreamDescriberMock mock = new StreamDescriberMock(STREAM_NAME, StreamStatus.UPDATING)
+        {
+            @SuppressWarnings("unused")
+            public UpdateShardCountResult updateShardCount(UpdateShardCountRequest request)
+            {
+                updateShardCountInvocationCount.incrementAndGet();
+                return new UpdateShardCountResult();
+            }
+        };
+
+        AmazonKinesis client = mock.getInstance();
+
+        long start = System.currentTimeMillis();
+        StreamStatus status = KinesisUtils.reshard(client, STREAM_NAME, 2, 250);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertEquals("returned status",             null, status);
+        assertEquals("update invocation count",     1, updateShardCountInvocationCount.get());
+        // describe interaction
+        // - first call
+        // - sleep 100
+        // - second call
+        // - sleep 100
+        // - third call
+        // - sleep 100
+        // - timeout
+        assertEquals("describe invocation count",   3, mock.describeInvocationCount.get());
+        NumericAsserts.assertInRange("elapsed time", 200, 350, elapsed);
+
+        boolean wasWarningEmitted = false;
+        for (LoggingEvent logEvent : loggingEvents)
+        {
+            if ((logEvent.getLevel() == Level.WARN)
+                && logEvent.getRenderedMessage().contains("reshard")
+                && logEvent.getRenderedMessage().contains("timed out")
+                && logEvent.getRenderedMessage().contains(STREAM_NAME))
+            {
+                wasWarningEmitted = true;
+            }
+        }
+        assertTrue("log included timeout warning", wasWarningEmitted);
+
+    }
+
+
+    @Test(expected=LimitExceededException.class)
+    public void testReshardUnrecoverableException() throws Exception
+    {
+        StreamDescriberMock mock = new StreamDescriberMock(STREAM_NAME, StreamStatus.UPDATING)
+        {
+            @Override
+            public DescribeStreamResult describeStream(DescribeStreamRequest request)
+            {
+                fail("unexpected call to describeStream(): should have failed before now");
+                return null;
+            }
+
+            @SuppressWarnings("unused")
+            public UpdateShardCountResult updateShardCount(UpdateShardCountRequest request)
+            {
+                throw new LimitExceededException("example");
+            }
+        };
+
+        AmazonKinesis client = mock.getInstance();
+        KinesisUtils.reshard(client, "example", 2, 1000);
+    }
+
+
+    @Test
     public void testRetrieveShardIteratorLatest() throws Exception
     {
+        // we're asserting the call so don't need to maintain a separate mock
         AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
         {
             @SuppressWarnings("unused")
             public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
             {
-                assertEquals("stream name",         "example",                                  request.getStreamName());
+                assertEquals("stream name",         STREAM_NAME,                                request.getStreamName());
                 assertEquals("shard ID",            "shard-0001",                               request.getShardId());
                 assertEquals("iterator type",       ShardIteratorType.LATEST.toString(),        request.getShardIteratorType());
                 assertEquals("sequence number",     null,                                       request.getStartingSequenceNumber());
@@ -728,7 +906,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, "example", "shard-0001", ShardIteratorType.LATEST, "123", NOW, 1000L));
+        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.LATEST, "123", NOW, 1000L));
     }
 
 
@@ -740,7 +918,7 @@ public class TestKinesisUtils
             @SuppressWarnings("unused")
             public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
             {
-                assertEquals("stream name",         "example",                                  request.getStreamName());
+                assertEquals("stream name",         STREAM_NAME,                                request.getStreamName());
                 assertEquals("shard ID",            "shard-0001",                               request.getShardId());
                 assertEquals("iterator type",       ShardIteratorType.TRIM_HORIZON.toString(),  request.getShardIteratorType());
                 assertEquals("sequence number",     null,                                       request.getStartingSequenceNumber());
@@ -749,7 +927,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, "example", "shard-0001", ShardIteratorType.TRIM_HORIZON, "123", NOW, 1000L));
+        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.TRIM_HORIZON, "123", NOW, 1000L));
     }
 
 
@@ -761,7 +939,7 @@ public class TestKinesisUtils
             @SuppressWarnings("unused")
             public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
             {
-                assertEquals("stream name",         "example",                                          request.getStreamName());
+                assertEquals("stream name",         STREAM_NAME,                                        request.getStreamName());
                 assertEquals("shard ID",            "shard-0001",                                       request.getShardId());
                 assertEquals("iterator type",       ShardIteratorType.AT_SEQUENCE_NUMBER.toString(),    request.getShardIteratorType());
                 assertEquals("sequence number",     "123",                                              request.getStartingSequenceNumber());
@@ -770,7 +948,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, "example", "shard-0001", ShardIteratorType.AT_SEQUENCE_NUMBER, "123", NOW, 1000L));
+        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AT_SEQUENCE_NUMBER, "123", NOW, 1000L));
     }
 
 
@@ -782,7 +960,7 @@ public class TestKinesisUtils
             @SuppressWarnings("unused")
             public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
             {
-                assertEquals("stream name",         "example",                                          request.getStreamName());
+                assertEquals("stream name",         STREAM_NAME,                                        request.getStreamName());
                 assertEquals("shard ID",            "shard-0001",                                       request.getShardId());
                 assertEquals("iterator type",       ShardIteratorType.AFTER_SEQUENCE_NUMBER.toString(), request.getShardIteratorType());
                 assertEquals("sequence number",     "123",                                              request.getStartingSequenceNumber());
@@ -791,7 +969,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, "example", "shard-0001", ShardIteratorType.AFTER_SEQUENCE_NUMBER, "123", NOW, 1000L));
+        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AFTER_SEQUENCE_NUMBER, "123", NOW, 1000L));
     }
 
 
@@ -803,7 +981,7 @@ public class TestKinesisUtils
             @SuppressWarnings("unused")
             public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
             {
-                assertEquals("stream name",         "example",                                  request.getStreamName());
+                assertEquals("stream name",         STREAM_NAME,                                request.getStreamName());
                 assertEquals("shard ID",            "shard-0001",                               request.getShardId());
                 assertEquals("iterator type",       ShardIteratorType.AT_TIMESTAMP.toString(),  request.getShardIteratorType());
                 assertEquals("sequence number",     null,                                       request.getStartingSequenceNumber());
@@ -812,7 +990,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, "example", "shard-0001", ShardIteratorType.AT_TIMESTAMP, "123", NOW, 1000L));
+        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AT_TIMESTAMP, "123", NOW, 1000L));
     }
 
 
@@ -829,7 +1007,7 @@ public class TestKinesisUtils
         }.getInstance();
 
         long start = System.currentTimeMillis();
-        assertNull("return value", KinesisUtils.retrieveShardIterator(client, "example", "shard-0001", ShardIteratorType.AT_TIMESTAMP, "123", NOW, 250L));
+        assertNull("return value", KinesisUtils.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AT_TIMESTAMP, "123", NOW, 250L));
         long elapsed = System.currentTimeMillis() - start;
         assertApproximate("elapsed time", 300, elapsed, 10);
     }

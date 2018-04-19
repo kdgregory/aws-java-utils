@@ -42,21 +42,15 @@ public class TestKinesisWriter
     private LinkedList<LoggingEvent> loggingEvents = new LinkedList<LoggingEvent>();
 
 //----------------------------------------------------------------------------
-//  Some common test parameters
-//----------------------------------------------------------------------------
-
-    public final static String STREAM_NAME = "TestKinesisWriter";
-
-//----------------------------------------------------------------------------
-//  Setup and teardown
+//  Common setup
 //----------------------------------------------------------------------------
 
     @Before
     public void setUp()
     {
-        Logger readerLogger = Logger.getLogger(KinesisWriter.class);
-        readerLogger.setLevel(Level.DEBUG);
-        readerLogger.addAppender(new AppenderSkeleton()
+        Logger writerLogger = Logger.getLogger(KinesisWriter.class);
+        writerLogger.setLevel(Level.DEBUG);
+        writerLogger.addAppender(new AppenderSkeleton()
         {
             @Override
             public void close()
@@ -77,6 +71,12 @@ public class TestKinesisWriter
             }
         });
     }
+
+//----------------------------------------------------------------------------
+//  Sample data
+//----------------------------------------------------------------------------
+
+    public final static String STREAM_NAME = "TestKinesisWriter";
 
 //----------------------------------------------------------------------------
 //  Helpers
