@@ -9,9 +9,11 @@ is null. All the while being prepared to handle rate-limiting or other exception
 
 ## Directory structure
 
-This project contains two directories:
+This project contains three directories:
 
 * `utils` is the main library of utility classes.
+* `test-helpers` contains classes that are useful for writing AWS tests. These are primarily
+  mock objects.
 * `integration-tests` are tests that exercise the `utils` classes against actual AWS services.
   *Beware:* running these tests will incur service charges.
 
@@ -68,9 +70,20 @@ if you don't like commons-logging you need to replace it (for example, with `jcl
 if you use the SLF4J logging framework). _Unlike_ the SDK, you don't have to explicitly
 ignore the transitive dependency.
 
+<<<<<<< HEAD
 The library makes use of two log levels: `WARN` and `DEBUG`. DEBUG is used for status from
 long-running operations or long-lived objects; WARN is used to report exceptions that are
 hidden by the library (for example, timeouts). "Real" errors are propagated, not logged. 
+=======
+This library does a moderate amount of debug-level logging, along with extensive logging of
+error conditions. You probably don't want to see the former, but should enable the latter.
+To do so with Log4J 1.x, use the following in your `log4j.properties` (adapt as needed for
+other logging frameworks):
+
+```
+log4j.logger.com.kdgregory.aws.utils=ERROR
+```
+>>>>>>> dev-11.0.0
 
 
 ## Source Control

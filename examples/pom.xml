@@ -43,7 +43,7 @@
 
         <aws-sdk.version>1.11.292</aws-sdk.version>
         <commons.logging.version>1.1.3</commons.logging.version>
-        <kdgcommons.version>1.0.15</kdgcommons.version>
+        <kdgcommons.version>1.0.16</kdgcommons.version>
         <log4j.version>1.2.16</log4j.version>
 
         <plugin.compiler.version>3.1</plugin.compiler.version>
@@ -55,6 +55,7 @@
             <groupId>com.kdgregory.aws</groupId>
             <artifactId>aws-java-utils</artifactId>
             <version>${project.version}</version>
+<<<<<<< HEAD
         </dependency>
 
         <dependency>
@@ -73,6 +74,11 @@
             <version>${log4j.version}</version>
         </dependency>
         <dependency>
+=======
+        </dependency>        
+
+        <dependency>
+>>>>>>> dev-11.0.0
             <groupId>net.sf.kdgcommons</groupId>
             <artifactId>kdgcommons</artifactId>
             <version>${kdgcommons.version}</version>
@@ -92,6 +98,7 @@
                     <debug>true</debug>
                 </configuration>
             </plugin>
+<<<<<<< HEAD
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -107,6 +114,8 @@
                     </execution>
                 </executions>
             </plugin>
+=======
+>>>>>>> dev-11.0.0
         </plugins>
     </build>
 
