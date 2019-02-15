@@ -1,4 +1,17 @@
-// Copyright (c) Keith D Gregory, all rights reserved
+// Copyright (c) Keith D Gregory
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package com.kdgregory.aws.utils.examples.cloudwatch;
 
 import java.util.HashMap;
@@ -7,7 +20,11 @@ import java.util.Random;
 
 import net.sf.kdgcommons.lang.ThreadUtil;
 
+import com.amazonaws.services.cloudwatch.AmazonCloudWatch;
+import com.amazonaws.services.cloudwatch.AmazonCloudWatchClientBuilder;
+
 import com.kdgregory.aws.utils.cloudwatch.MetricReporter;
+
 
 /**
  *  Demonstrates the use of the metric reporter. Note that you will be charged
@@ -18,10 +35,9 @@ public class MetricReporterExample
     public static void main(String[] argv)
     throws Exception
     {
-        Map<String,String> defaultDimensions = new HashMap<String,String>();
-        defaultDimensions.put("environment", "example");
-
-        final MetricReporter reporter = new MetricReporter("com.kdgregory.aws.utils.examples.cloudwatch", defaultDimensions);
+        final AmazonCloudWatch client = AmazonCloudWatchClientBuilder.defaultClient();
+        final MetricReporter reporter = new MetricReporter(client, "com.kdgregory.aws.utils.examples.cloudwatch")
+                                        .withDimension("environment", "example");
 
         for (int ii = 0 ; ii< 2 ; ii++)
         {
@@ -40,7 +56,7 @@ public class MetricReporterExample
                     {
                         value += rnd.nextInt(101) - 50;
                         System.out.println(Thread.currentThread().getName() + ": " + value);
-                        reporter.report("randomWalk", threadDimensions, value);
+                        reporter.report("example", threadDimensions, value);
                         ThreadUtil.sleepQuietly(10000L);
                     }
                 }
