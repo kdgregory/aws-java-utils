@@ -14,6 +14,12 @@
 
 package com.kdgregory.aws.utils.cloudwatch;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+
 import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
@@ -23,17 +29,11 @@ import org.apache.log4j.WriterAppender;
 
 import net.sf.kdgcommons.test.SelfMock;
 import static net.sf.kdgcommons.test.NumericAsserts.*;
-import static net.sf.kdgcommons.test.StringAsserts.*;
-
-import java.io.StringWriter;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.RejectedExecutionException;
 
 import com.amazonaws.services.cloudwatch.AmazonCloudWatch;
 import com.amazonaws.services.cloudwatch.model.*;
+
+import com.kdgregory.aws.utils.testhelpers.Log4JCapturingAppender;
 
 
 public class TestMetricReporter
@@ -67,15 +67,10 @@ public class TestMetricReporter
 //  Per-test boilerplate
 //----------------------------------------------------------------------------
 
-    // we capture logging everywhere, but only check it where we know we'll log
-    private StringWriter capturedLoggingOutput = new StringWriter();
-
     @Before
     public void setUp()
     {
-        Logger testOutputLogger = Logger.getLogger("com.kdgregory.aws.utils");
-        WriterAppender appender = (WriterAppender)testOutputLogger.getAppender("test");
-        appender.setWriter(capturedLoggingOutput);
+        Log4JCapturingAppender.getInstance().reset();
     }
 
 //----------------------------------------------------------------------------
@@ -254,11 +249,8 @@ public class TestMetricReporter
 
         assertNotNull("putMetricData() called", mock.lastPutMetricDataRequest);
 
-        String[] loggingOutput = capturedLoggingOutput.toString().split("\n");
-
-        assertTrue("exception was logged", loggingOutput.length > 0);
-        assertRegex("log output contains metric name and namespace (was: " + loggingOutput[0] + ")",
-                    "failed to publish.*example.*" + DEFAULT_NAMESPACE + ".*",
-                    loggingOutput[0]);
+        Log4JCapturingAppender.getInstance().assertContent(
+            "failed to publish.*example.*" + DEFAULT_NAMESPACE + ".*",
+            0);
     }
 }
