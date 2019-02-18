@@ -21,6 +21,8 @@ import org.apache.log4j.AppenderSkeleton;
 import org.apache.log4j.Logger;
 import org.apache.log4j.spi.LoggingEvent;
 
+import static org.junit.Assert.*;
+
 import net.sf.kdgcommons.test.StringAsserts;
 
 
@@ -84,9 +86,18 @@ extends AppenderSkeleton
 //----------------------------------------------------------------------------
 
     /**
+     *  Asserts that the log is empty.
+     */
+    public void assertNoLogEntries()
+    {
+        assertEquals("captured logging events", 0, events.size());
+    }
+
+
+    /**
      *  Assets that a particular log entry matches the specified regex.
      */
-    public void assertContent(String expectedRegex, int lineNo)
+    public void assertLogEntry(String expectedRegex, int lineNo)
     {
         String logMessage =  String.valueOf(events.get(lineNo).getMessage());
         StringAsserts.assertRegex(
