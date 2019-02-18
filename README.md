@@ -11,10 +11,9 @@ is null. All the while being prepared to handle rate-limiting or other exception
 
 This project contains three directories:
 
-* `utils` is the main library of utility classes.
-* `test-helpers` contains classes that are useful for writing AWS tests. These are primarily
-  mock objects.
-* `integration-tests` are tests that exercise the `utils` classes against actual AWS services.
+* `library` is the main library of utility classes.
+* `examples` contains programs that demonstrate the library.
+* `integration-tests` are tests that exercise the library classes against actual AWS services.
   *Beware:* running these tests will incur service charges.
 
 
@@ -24,18 +23,16 @@ The top-level package is `com.kdgregory.aws.utils`. Under this are packages name
 services (example: `com.kdgregory.aws.utils.kinesis`).
 
 Within each package there is a class containing static utility methods, named after the service
-(example: `KinesisUtil`). There may also be instantiable classes (example: `KinesisReader`). In
-the test project there will typically be a mock client object (example: `MockAmazonKinesis`)
-and may be a class containing static utility methods (but that's rare).
+(example: `KinesisUtil`). There may also be instantiable classes (example: `KinesisReader`).
 
 
 ## Versioning
 
 I follow the standard `MAJOR.MINOR.PATCH` versioning scheme:
 
-* `MAJOR` tracks the AWS SDK minor version (eg, version 11.0.0 of this library is used with version 1.11.x of the SDK)
-* `MINOR` is incremented whenever new services are supported; each AWS service typically has a single `FooUtils` class.
-* `PATCH` is incremented for bugfixes and whenever new methods are added to an existing class.
+* `MAJOR` tracks the AWS SDK major version (currently only version 1 is supported, not version 2).
+* `MINOR` tracks the AWS SDK minor version (currently 11).
+* `PATCH` is incremented whenever functionality is added.
   
 Not all versions will be released to Maven Central. I may choose to make release (non-snapshot) versions for
 development testing, or as interim steps of a bigger piece of functionality. However, all release versions
