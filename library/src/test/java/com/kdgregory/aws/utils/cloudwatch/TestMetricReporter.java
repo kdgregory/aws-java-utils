@@ -24,6 +24,8 @@ import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
+import org.apache.log4j.Level;
+
 import net.sf.kdgcommons.test.SelfMock;
 import static net.sf.kdgcommons.test.NumericAsserts.*;
 
@@ -246,8 +248,6 @@ public class TestMetricReporter
 
         assertNotNull("putMetricData() called", mock.lastPutMetricDataRequest);
 
-        Log4JCapturingAppender.getInstance().assertLogEntry(
-            "failed to publish.*example.*" + DEFAULT_NAMESPACE + ".*",
-            0);
+        Log4JCapturingAppender.getInstance().assertLogEntry(0, Level.WARN, "failed to publish.*example.*" + DEFAULT_NAMESPACE + ".*");
     }
 }

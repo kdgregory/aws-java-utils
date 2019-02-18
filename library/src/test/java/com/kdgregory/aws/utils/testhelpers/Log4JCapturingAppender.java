@@ -19,6 +19,7 @@ import java.util.List;
 
 import org.apache.log4j.AppenderSkeleton;
 import org.apache.log4j.Logger;
+import org.apache.log4j.Level;
 import org.apache.log4j.spi.LoggingEvent;
 
 import static org.junit.Assert.*;
@@ -86,23 +87,25 @@ extends AppenderSkeleton
 //----------------------------------------------------------------------------
 
     /**
-     *  Asserts that the log is empty.
+     *  Asserts the number of rows in the log (normally called with 0).
      */
-    public void assertNoLogEntries()
+    public void assertLogSize(int expectedSize)
     {
-        assertEquals("captured logging events", 0, events.size());
+        assertEquals("number of log entries", expectedSize, events.size());
     }
 
 
     /**
      *  Assets that a particular log entry matches the specified regex.
+     * @param expectedLevel TODO
      */
-    public void assertLogEntry(String expectedRegex, int lineNo)
+    public void assertLogEntry(int idx, Level expectedLevel, String expectedRegex)
     {
-        String logMessage =  String.valueOf(events.get(lineNo).getMessage());
+        assertEquals("internal logging entry " + idx + " level", expectedLevel, events.get(idx).getLevel());
+        
+        String logMessage =  String.valueOf(events.get(idx).getMessage());
         StringAsserts.assertRegex(
-            "internal logging line " + lineNo + " expected \"" + expectedRegex + "\" (was: \"" + logMessage + "\"",
-            expectedRegex,
-            logMessage);
+            "internal logging line " + idx + " message (expected \"" + expectedRegex + "\", was: \"" + logMessage + "\"",
+            expectedRegex, logMessage);
     }
 }

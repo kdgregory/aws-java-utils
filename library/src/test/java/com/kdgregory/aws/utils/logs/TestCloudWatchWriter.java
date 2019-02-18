@@ -22,6 +22,8 @@ import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
+import org.apache.log4j.Level;
+
 import net.sf.kdgcommons.lang.StringUtil;
 import static net.sf.kdgcommons.test.NumericAsserts.*;
 import static net.sf.kdgcommons.test.StringAsserts.*;
@@ -35,6 +37,8 @@ import com.kdgregory.aws.utils.testhelpers.mocks.MockAWSLogsClient;
 
 public class TestCloudWatchWriter
 {
+    private Log4JCapturingAppender testLog;
+    
     private void assertMessages(List<InputLogEvent> actual, String... expected)
     {
         assertEquals("number of messages", expected.length, actual.size());
@@ -53,7 +57,8 @@ public class TestCloudWatchWriter
     @Before
     public void setUp()
     {
-        Log4JCapturingAppender.getInstance().reset();
+        testLog = Log4JCapturingAppender.getInstance();
+        testLog.reset();
     }
 
 //----------------------------------------------------------------------------
@@ -81,7 +86,7 @@ public class TestCloudWatchWriter
 
         assertMessages(mock.lastBatch.getLogEvents(), "appended second", "appended first");
 
-        Log4JCapturingAppender.getInstance().assertNoLogEntries();
+        testLog.assertLogSize(0);
     }
 
 
@@ -106,9 +111,9 @@ public class TestCloudWatchWriter
 
         assertMessages(mock.lastBatch.getLogEvents(), "appended second", "appended first");
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("stream.*argle.*bargle.*does not exist.*", 0);
-        Log4JCapturingAppender.getInstance().assertLogEntry("creating .* log stream.*bargle.*", 1);
-        Log4JCapturingAppender.getInstance().assertLogEntry("creating .* log group.*argle.*", 2);
+        testLog.assertLogEntry(0, Level.DEBUG, "stream.*argle.*bargle.*does not exist.*");
+        testLog.assertLogEntry(1, Level.DEBUG, "creating .* log stream.*bargle.*");
+        testLog.assertLogEntry(2, Level.DEBUG, "creating .* log group.*argle.*");
     }
 
 
@@ -184,7 +189,7 @@ public class TestCloudWatchWriter
         assertEquals("last batch first message",            "7999",     mock.lastBatch.getLogEvents().get(0).getMessage());
         assertEquals("last batch last message",             "0",        mock.lastBatch.getLogEvents().get(7999).getMessage());
 
-        Log4JCapturingAppender.getInstance().assertNoLogEntries();
+        testLog.assertLogSize(0);
     }
 
 
@@ -216,7 +221,7 @@ public class TestCloudWatchWriter
         assertRegex("last batch first message",             ".* 0975",  mock.lastBatch.getLogEvents().get(0).getMessage());
         assertRegex("last batch last message",              ".* 0000",  mock.lastBatch.getLogEvents().get(975).getMessage());
 
-        Log4JCapturingAppender.getInstance().assertNoLogEntries();
+        testLog.assertLogSize(0);
     }
 
 
@@ -245,6 +250,6 @@ public class TestCloudWatchWriter
         assertEquals("last batch first message",            "59",       mock.lastBatch.getLogEvents().get(0).getMessage());
         assertEquals("last batch last message",             "0",        mock.lastBatch.getLogEvents().get(59).getMessage());
 
-        Log4JCapturingAppender.getInstance().assertNoLogEntries();
+        testLog.assertLogSize(0);
     }
 }

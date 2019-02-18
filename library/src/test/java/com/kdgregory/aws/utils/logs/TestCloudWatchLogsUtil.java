@@ -23,6 +23,8 @@ import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
+import org.apache.log4j.Level;
+
 import static net.sf.kdgcommons.test.NumericAsserts.*;
 
 import com.amazonaws.services.logs.AWSLogs;
@@ -35,6 +37,12 @@ import com.kdgregory.aws.utils.testhelpers.mocks.MockAWSLogsClient;
 
 public class TestCloudWatchLogsUtil
 {
+    private Log4JCapturingAppender testLog;
+
+//----------------------------------------------------------------------------
+//  Helpers
+//----------------------------------------------------------------------------
+
     /**
      *  Asserts that a list of log groups contains all of the expected names.
      */
@@ -75,7 +83,8 @@ public class TestCloudWatchLogsUtil
     @Before
     public void setUp()
     {
-        Log4JCapturingAppender.getInstance().reset();
+        testLog = Log4JCapturingAppender.getInstance();
+        testLog.reset();
     }
 
 //----------------------------------------------------------------------------
@@ -92,7 +101,7 @@ public class TestCloudWatchLogsUtil
         List<LogGroup> groups = CloudWatchLogsUtil.describeLogGroups(client, null);
         assertLogGroupNames(groups, "foo", "bar", "baz");
 
-        Log4JCapturingAppender.getInstance().assertNoLogEntries();
+        testLog.assertLogSize(0);
     }
 
 
@@ -106,7 +115,7 @@ public class TestCloudWatchLogsUtil
         List<LogGroup> groups = CloudWatchLogsUtil.describeLogGroups(client, "ba");
         assertLogGroupNames(groups, "bar", "baz");
 
-        Log4JCapturingAppender.getInstance().assertNoLogEntries();
+        testLog.assertLogSize(0);
     }
 
 
@@ -122,7 +131,7 @@ public class TestCloudWatchLogsUtil
         assertLogGroupNames(groups, "bar", "baz");
         assertEquals("describeLogGroups invocation count", 2, mock.describeLogGroupsInvocationCount);
 
-        Log4JCapturingAppender.getInstance().assertNoLogEntries();
+        testLog.assertLogSize(0);
     }
 
 
@@ -136,7 +145,7 @@ public class TestCloudWatchLogsUtil
         List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "foo", null);
         assertLogStreamNames(streams, "argle", "bargle", "bazzle");
 
-        Log4JCapturingAppender.getInstance().assertNoLogEntries();
+        testLog.assertLogSize(0);
     }
 
 
@@ -150,7 +159,7 @@ public class TestCloudWatchLogsUtil
         List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "foo", "ba");
         assertLogStreamNames(streams, "bargle", "bazzle");
 
-        Log4JCapturingAppender.getInstance().assertNoLogEntries();
+        testLog.assertLogSize(0);
     }
 
 
@@ -166,7 +175,7 @@ public class TestCloudWatchLogsUtil
         assertLogStreamNames(streams, "bargle", "bazzle");
         assertEquals("describeLogStreams invocation count", 2, mock.describeLogStreamsInvocationCount);
 
-        Log4JCapturingAppender.getInstance().assertNoLogEntries();
+        testLog.assertLogSize(0);
     }
 
 
@@ -181,7 +190,7 @@ public class TestCloudWatchLogsUtil
         List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "fribble", "ba");
         assertLogStreamNames(streams);
 
-        Log4JCapturingAppender.getInstance().assertNoLogEntries();
+        testLog.assertLogSize(0);
     }
 
 
@@ -210,7 +219,7 @@ public class TestCloudWatchLogsUtil
         assertTrue("made multiple describe attempts", mock.describeLogGroupsInvocationCount > 1);
         assertInRange("waited between attempts", 50, 100, (finish - start));
 
-        Log4JCapturingAppender.getInstance().assertNoLogEntries();
+        testLog.assertLogSize(0);
     }
 
 
@@ -229,7 +238,7 @@ public class TestCloudWatchLogsUtil
         assertTrue("made multiple describe attempts",               mock.describeLogGroupsInvocationCount > 1);
         assertInRange("waited between attempts",        80, 120,    (finish - start));
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("timeout expired.*log group.*biff", 0);
+        testLog.assertLogEntry(0, Level.WARN, "timeout expired.*log group.*biff");
     }
 
 
@@ -248,7 +257,7 @@ public class TestCloudWatchLogsUtil
         assertTrue("made multiple describe attempts",               mock.describeLogGroupsInvocationCount > 1);
         assertInRange("waited between attempts",        30, 80,     (finish - start));
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("timeout expired.*log group.*ba", 0);
+        testLog.assertLogEntry(0, Level.WARN, "timeout expired.*log group.*ba");
     }
 
 
@@ -277,7 +286,7 @@ public class TestCloudWatchLogsUtil
         assertTrue("made multiple describe attempts", mock.describeLogStreamsInvocationCount > 1);
         assertInRange("waited between attempts", 50, 100, (finish - start));
 
-        Log4JCapturingAppender.getInstance().assertNoLogEntries();
+        testLog.assertLogSize(0);
     }
 
 
@@ -296,7 +305,7 @@ public class TestCloudWatchLogsUtil
         assertTrue("made multiple describe attempts", mock.describeLogStreamsInvocationCount > 1);
         assertInRange("waited between attempts", 80, 120, (finish - start));
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("timeout expired.*log stream.*biff", 0);
+        testLog.assertLogEntry(0, Level.WARN, "timeout expired.*log stream.*biff");
     }
 
 
@@ -311,7 +320,7 @@ public class TestCloudWatchLogsUtil
 
         assertNull("did not find log stream", stream);
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("timeout expired.*log stream.*ba", 0);
+        testLog.assertLogEntry(0, Level.WARN, "timeout expired.*log stream.*ba");
     }
 
 
@@ -340,7 +349,7 @@ public class TestCloudWatchLogsUtil
         assertTrue("made multiple describes",                           mock.describeLogGroupsInvocationCount > 1);
         assertInRange("waited between describes",           20, 90,     (finish - start));
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("creating.*log group.*bar", 0);
+        testLog.assertLogEntry(0, Level.DEBUG, "creating.*log group.*bar");
     }
 
 
@@ -356,7 +365,7 @@ public class TestCloudWatchLogsUtil
         assertEquals("createLogGroup invocation count",     1,      mock.createLogGroupInvocationCount);
         assertEquals("describeLogGroups invocation count",  1,      mock.describeLogGroupsInvocationCount);
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("creating.*log group.*foo", 0);
+        testLog.assertLogEntry(0, Level.DEBUG, "creating.*log group.*foo");
     }
 
 
@@ -382,7 +391,7 @@ public class TestCloudWatchLogsUtil
         assertEquals("createLogGroup invocation count",     1,          mock.createLogGroupInvocationCount);
         assertEquals("describeLogGroups invocation count",  1,          mock.describeLogGroupsInvocationCount);
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("creating.*log group.*bar", 0);
+        testLog.assertLogEntry(0, Level.DEBUG, "creating.*log group.*bar");
     }
 
 
@@ -410,8 +419,8 @@ public class TestCloudWatchLogsUtil
         assertTrue("made multiple describes",                           mock.describeLogGroupsInvocationCount > 1);
         assertInRange("waited between describes",           150, 250,   (finish - start));
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("creating.*log group.*bar", 0);
-        Log4JCapturingAppender.getInstance().assertLogEntry("timeout expired.*log group.*bar", 1);
+        testLog.assertLogEntry(0, Level.DEBUG, "creating.*log group.*bar");
+        testLog.assertLogEntry(1, Level.WARN, "timeout expired.*log group.*bar");
     }
 
 
@@ -442,7 +451,7 @@ public class TestCloudWatchLogsUtil
         assertEquals("createLogStream invocation count",    1,          mock.createLogStreamInvocationCount);
         assertInRange("waited between describes",           20, 90,     (finish - start));
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("creating.*log stream.*foo.*bargle", 0);
+        testLog.assertLogEntry(0, Level.DEBUG, "creating.*log stream.*foo.*bargle");
     }
 
 
@@ -460,7 +469,7 @@ public class TestCloudWatchLogsUtil
         assertEquals("createLogGroup invocation count",     0,          mock.createLogGroupInvocationCount);
         assertEquals("createLogStream invocation count",    1,          mock.createLogStreamInvocationCount);
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("creating.*log stream.*foo.*argle", 0);
+        testLog.assertLogEntry(0, Level.DEBUG, "creating.*log stream.*foo.*argle");
     }
 
 
@@ -489,8 +498,8 @@ public class TestCloudWatchLogsUtil
         assertEquals("createLogStream invocation count",    1,          mock.createLogStreamInvocationCount);
         assertInRange("waited between describes",           150, 250,   (finish - start));
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("creating.*log stream.*foo.*bargle", 0);
-        Log4JCapturingAppender.getInstance().assertLogEntry("timeout expired.*log stream.*bargle", 1);
+        testLog.assertLogEntry(0, Level.DEBUG, "creating.*log stream.*foo.*bargle");
+        testLog.assertLogEntry(1, Level.WARN, "timeout expired.*log stream.*bargle");
     }
 
 
@@ -508,7 +517,7 @@ public class TestCloudWatchLogsUtil
         assertEquals("createLogGroup invocation count",     1,          mock.createLogGroupInvocationCount);
         assertEquals("createLogStream invocation count",    1,          mock.createLogStreamInvocationCount);
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("creating.*log stream.*bar.*bargle", 0);
+        testLog.assertLogEntry(0, Level.DEBUG, "creating.*log stream.*bar.*bargle");
     }
 
 
@@ -540,7 +549,7 @@ public class TestCloudWatchLogsUtil
         assertEquals("describeLogGroups invocation count",  3,          mock.describeLogGroupsInvocationCount);
         assertInRange("waited between describes",           50, 150,    (finish - start));
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("deleting.*log group.*foo", 0);
+        testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log group.*foo");
     }
 
 
@@ -555,7 +564,7 @@ public class TestCloudWatchLogsUtil
         assertEquals("deleteLogGroup invocation count",     1,          mock.deleteLogGroupInvocationCount);
         assertEquals("describeLogGroups invocation count",  0,          mock.describeLogGroupsInvocationCount);
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("deleting.*log group.*bar", 0);
+        testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log group.*bar");
     }
 
 
@@ -578,7 +587,7 @@ public class TestCloudWatchLogsUtil
         assertEquals("deleteLogGroup invocation count",     1,          mock.deleteLogGroupInvocationCount);
         assertEquals("describeLogGroups invocation count",  1,          mock.describeLogGroupsInvocationCount);
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("deleting.*log group.*bar", 0);
+        testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log group.*bar");
     }
 
 
@@ -605,8 +614,8 @@ public class TestCloudWatchLogsUtil
         assertEquals("describeLogGroups invocation count",  4,          mock.describeLogGroupsInvocationCount);
         assertInRange("waited between describes",           150, 250,   (finish - start));
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("deleting.*log group.*foo", 0);
-        Log4JCapturingAppender.getInstance().assertLogEntry("timeout.*foo", 1);
+        testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log group.*foo");
+        testLog.assertLogEntry(1, Level.WARN, "timeout.*foo");
     }
 
 
@@ -640,7 +649,7 @@ public class TestCloudWatchLogsUtil
         assertEquals("describeLogStreams invocation count",     3,          mock.describeLogStreamsInvocationCount);
         assertInRange("waited between describes",               50, 150,    (finish - start));
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("deleting.*log stream.*foo.*argle", 0);
+        testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log stream.*foo.*argle");
     }
 
 
@@ -655,7 +664,7 @@ public class TestCloudWatchLogsUtil
         assertEquals("deleteLogStream invocation count",        1,          mock.deleteLogStreamInvocationCount);
         assertEquals("describeLogStreams invocation count",     0,          mock.describeLogStreamsInvocationCount);
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("deleting.*log stream.*foo.*bargle", 0);
+        testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log stream.*foo.*bargle");
     }
 
 
@@ -678,7 +687,7 @@ public class TestCloudWatchLogsUtil
         assertEquals("deleteLogStream invocation count",        1,          mock.deleteLogStreamInvocationCount);
         assertEquals("describeLogStreams invocation count",     1,          mock.describeLogStreamsInvocationCount);
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("deleting.*log stream.*foo.*bargle", 0);
+        testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log stream.*foo.*bargle");
     }
 
 
@@ -704,7 +713,7 @@ public class TestCloudWatchLogsUtil
         assertEquals("describeLogStreams invocation count",     4,          mock.describeLogStreamsInvocationCount);
         assertInRange("waited between describes",               150, 250,   (finish - start));
 
-        Log4JCapturingAppender.getInstance().assertLogEntry("deleting.*log stream.*foo.*argle", 0);
-        Log4JCapturingAppender.getInstance().assertLogEntry("timeout.*foo.*argle", 1);
+        testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log stream.*foo.*argle");
+        testLog.assertLogEntry(1, Level.DEBUG, "timeout.*foo.*argle");
     }
 }

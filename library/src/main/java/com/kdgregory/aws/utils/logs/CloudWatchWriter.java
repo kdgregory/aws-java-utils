@@ -174,11 +174,11 @@ public class CloudWatchWriter
         LogStream stream = CloudWatchLogsUtil.describeLogStream(client, logGroupName, logStreamName);
         if (stream == null)
         {
-            logger.info("stream " + logGroupName + "/" + logStreamName + " does not exist, re-creating");
+            logger.debug("stream " + logGroupName + "/" + logStreamName + " does not exist, creating");
             stream = CloudWatchLogsUtil.createLogStream(client, logGroupName, logStreamName, 30000);
             if (stream == null)
             {
-                logger.info("stream " + logGroupName + "/" + logStreamName + " not ready after creation");
+                logger.warn("stream " + logGroupName + "/" + logStreamName + " not ready after creation");
                 return null;
             }
         }
