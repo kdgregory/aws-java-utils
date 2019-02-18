@@ -16,6 +16,7 @@ package com.kdgregory.aws.utils.testhelpers.mocks;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import net.sf.kdgcommons.lang.StringUtil;
 import net.sf.kdgcommons.test.SelfMock;
@@ -38,10 +39,16 @@ extends SelfMock<AWSLogs>
     public int deleteLogStreamInvocationCount = 0;
     public int describeLogGroupsInvocationCount = 0;
     public int describeLogStreamsInvocationCount = 0;
+    public int putLogEventsInvocationCount = 0;
+
+    public PutLogEventsRequest lastBatch;
+    public List<InputLogEvent> allMessages = new ArrayList<InputLogEvent>();
 
     protected ArrayList<String> knownLogGroupNames = new ArrayList<String>();
     protected ArrayList<String> knownLogStreamNames = new ArrayList<String>();
     protected int pageSize = Integer.MAX_VALUE;
+
+    protected String uploadSequenceToken = UUID.randomUUID().toString();
 
 
     /**
@@ -170,9 +177,24 @@ extends SelfMock<AWSLogs>
             boolean include = StringUtil.isEmpty(request.getLogStreamNamePrefix())
                            || name.startsWith(request.getLogStreamNamePrefix());
             if (include)
-                streams.add(new LogStream().withLogStreamName(name));
+            {
+                LogStream stream = new LogStream().withLogStreamName(name)
+                                   .withUploadSequenceToken(uploadSequenceToken);
+                streams.add(stream);
+            }
         }
 
         return new DescribeLogStreamsResult().withLogStreams(streams).withNextToken(nextToken);
+    }
+
+
+    public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
+    {
+        putLogEventsInvocationCount++;
+        lastBatch = request;
+        allMessages.addAll(request.getLogEvents());
+
+        uploadSequenceToken = UUID.randomUUID().toString();
+        return new PutLogEventsResult().withNextSequenceToken(uploadSequenceToken);
     }
 }

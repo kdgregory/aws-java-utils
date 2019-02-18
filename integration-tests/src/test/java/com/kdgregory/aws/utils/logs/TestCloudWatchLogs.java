@@ -25,6 +25,9 @@ import com.amazonaws.services.logs.AWSLogs;
 import com.amazonaws.services.logs.AWSLogsClientBuilder;
 
 
+/**
+ *  Combined test for all CloudWatch Logs functionality.
+ */
 public class TestCloudWatchLogs
 {
     // a single instance of the client is shared between all tests
@@ -74,5 +77,26 @@ public class TestCloudWatchLogs
         assertNull("post-delete-group describeLogGroup()",      CloudWatchLogsUtil.describeLogGroup(client, logGroupName));
         assertNull("post-delete-group describeLogStream()",     CloudWatchLogsUtil.describeLogStream(client, logGroupName, logStreamName));
     }
+    
+    
+    @Test
+    public void testWriterAndReader() throws Exception 
+    {
+        String namePrefix = "TestLogsUtil-testWriterAndReader";
+        String logGroupName = namePrefix + "-logGroup-" + UUID.randomUUID();
+        String logStreamName = namePrefix + "-logStream-" + UUID.randomUUID();
+        
+        long now = System.currentTimeMillis();
+        
+        CloudWatchWriter writer = new CloudWatchWriter(client, logGroupName, logStreamName);
+        
+        for (int ii = 0 ; ii < 1000 ; ii++)
+        {
+            writer.add(now - 15 * ii, String.format("message %d", ii));
+        }
+        writer.flush();
+        
+    }
+    
 
 }
