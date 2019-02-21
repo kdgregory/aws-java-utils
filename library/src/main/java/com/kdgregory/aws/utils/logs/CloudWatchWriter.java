@@ -22,6 +22,8 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -32,9 +34,12 @@ import com.amazonaws.services.logs.model.*;
 /**
  *  Writes messages to CloudWatch Logs in batches, either under application control
  *  or using a background thread. Messages may be added concurrently by any thread.
- *  Any thread may also invoke {@link #flush}; invocations are synchronized.
+ *  Any thread may also call {@link #flush}; invocations are synchronized.
  *  <p>
- *
+ *  The writer maintains a set of monitoring variables, such as the number of calls
+ *  to {@link #flush}, which can be examined by the application. It writes debug
+ *  logging messages for significant events (such as creating a log stream), and
+ *  warning messages for unexpected exceptions.
  */
 public class CloudWatchWriter
 {
@@ -45,6 +50,13 @@ public class CloudWatchWriter
     private String logStreamName;
 
     private LinkedBlockingDeque<QueuedMessage> unsentMessages = new LinkedBlockingDeque<QueuedMessage>();
+    private volatile boolean isShutdown = false;
+
+    private AtomicInteger flushCount = new AtomicInteger(0);
+    private AtomicInteger batchCount = new AtomicInteger(0);
+    private AtomicInteger invalidSequenceCount = new AtomicInteger(0);
+    private AtomicLong totalMessagesSent = new AtomicLong();
+    private AtomicLong totalMessagesRejected = new AtomicLong();
 
 
     /**
@@ -75,6 +87,7 @@ public class CloudWatchWriter
      *
      *  @throws IllegalArgumentException if the message is too large to fit in
      *          a batch (even by itself).
+     *  @throws IllegalStateException if called after {@link #shutdown}.
      */
     public void add(String message)
     {
@@ -85,33 +98,53 @@ public class CloudWatchWriter
     /**
      *  Adds a message to the queue, with specified timestamp.
      *
-     *  @throws IllegalArgumentException if the message it too large to fit in
-     *          a batch (even by itself) or the timestamp does not within the
-     *          allowable range. Note that a message may still be rejected if
-     *          the timestamp is older than the queue's retention period (this
-     *          is checked by {@link #flush}).
+     *  @throws IllegalArgumentException if the message it too large to fit in a
+     *          batch (even by itself) or the timestamp does not within the allowed
+     *          range. Note that a message may accepted here but rejected during
+     *          {@link #flush}, either because of a delay between add and flush or
+     *          because the log group has a shorter retention period.
+     *  @throws IllegalStateException if called after {@link #shutdown}.
      */
     public void add(long timestamp, String message)
     {
+        if (isShutdown)
+        {
+            throw new IllegalStateException(
+                        "writer has shut down"
+                        + " (stream: " + logGroupName + "/" + logStreamName + ")");
+        }
+
         long earliestAllowedTimestamp = System.currentTimeMillis() - 14 * 86400000;
         if (timestamp < earliestAllowedTimestamp)
+        {
             throw new IllegalArgumentException(
-                        "message timestamp too far in past: " + timestamp
-                        + " (limit: " + earliestAllowedTimestamp + ")");
+                        "message timestamp too far in past"
+                        + " (stream: " + logGroupName + "/" + logStreamName + ")"
+                        + ": " + timestamp
+                        + "; limit: " + earliestAllowedTimestamp);
+        }
 
         long latestAllowedTimestamp = System.currentTimeMillis() + 2 * 3600000;
         if (timestamp > latestAllowedTimestamp)
+        {
             throw new IllegalArgumentException(
-                        "message timestamp too far in future: " + timestamp
-                        + " (limit: " + latestAllowedTimestamp + ")");
+                        "message timestamp too far in future"
+                        + " (stream: " + logGroupName + "/" + logStreamName + ")"
+                        + ": " + timestamp
+                        + "; limit: " + latestAllowedTimestamp);
+        }
 
         QueuedMessage qmessage = new QueuedMessage(timestamp, message);
 
         long sizeLimit = 1024 * 1024 - 26;
         if (qmessage.size > sizeLimit)
+        {
             throw new IllegalArgumentException(
-                        "message is too large: " + qmessage.size + " bytes"
-                        + " (limit: " + sizeLimit + ")");
+                        "message is too large"
+                        + " (stream: " + logGroupName + "/" + logStreamName + ")"
+                        + ": " + qmessage.size + " bytes"
+                        + "; limit: " + sizeLimit);
+        }
 
         unsentMessages.add(qmessage);
     }
@@ -123,6 +156,8 @@ public class CloudWatchWriter
      */
     public synchronized void flush()
     {
+        flushCount.incrementAndGet();
+
         LinkedList<QueuedMessage> messages = extractAndSortMessages();
         if (messages.isEmpty())
             return;
@@ -138,12 +173,31 @@ public class CloudWatchWriter
                     uploadSequenceToken = attemptToSend(batch, uploadSequenceToken);
                     batch.clear();
                 }
+                catch (DataAlreadyAcceptedException ex)
+                {
+                    // in normal operation this shouldn't happen, so it's worth a warning
+                    logger.warn("DataAlreadyAcceptedException: discarded " + batch.size()
+                                + " to stream: " + logGroupName + "/" + logStreamName);
+                    batch.clear();
+                }
+                catch (InvalidSequenceTokenException ex)
+                {
+                    invalidSequenceCount.incrementAndGet();
+                    uploadSequenceToken = retrieveUploadSequenceToken();
+                }
                 finally
                 {
-                    // there will only be messages remaining if there was an exception
-                    unsentMessages.addAll(messages);
+                    // the batch will be empty unless there was an exception
+                    messages.addAll(0, batch);
                 }
             }
+        }
+        catch (Exception ex)
+        {
+            // this catches unexpected exceptions, which are allowed to break out of the writer loop
+            // it's worth logging, but I don't think a long stack trace will help anyone
+            logger.warn(ex.getClass().getSimpleName() + " writing to stream: "
+                        + logGroupName + "/" + logStreamName);
         }
         finally
         {
@@ -159,6 +213,63 @@ public class CloudWatchWriter
      */
     public void shutdown()
     {
+        logger.debug("shutdown called (writing to: " + logGroupName + "/" + logStreamName + ")");
+        isShutdown = true;
+        flush();
+    }
+
+//----------------------------------------------------------------------------
+//  Monitoring
+//----------------------------------------------------------------------------
+
+    /**
+     *  Returns the number of times that {@link #flush} was called.
+     */
+    public int getFlushCount()
+    {
+        return flushCount.get();
+    }
+
+
+    /**
+     *  Returns the number of batches that were successfully written.
+     */
+    public int getBatchCount()
+    {
+        return batchCount.get();
+    }
+
+
+    /**
+     *  Returns the number of times a batch was retried due to an invalid
+     *  sequence token. This exeption indicates concurrent writes to the
+     *  same log stream. It should be close to 0; if not, increase the
+     *  amount of time between batchs (if running on a background thread)
+     *  or write to different log streams.
+     */
+    public int getInvalidSequenceCount()
+    {
+        return invalidSequenceCount.get();
+    }
+
+
+    /**
+     *  Returns the total number of messages that were sent to the stream over the
+     *  lifetime of the writer.
+     */
+    public long getTotalMessagesSent()
+    {
+        return totalMessagesSent.get();
+    }
+
+
+    /**
+     *  Returns the number of messages that were sent to the stream but rejected for
+     *  being outside the allowed time range.
+     */
+    public long getTotalMessagesRejected()
+    {
+        return totalMessagesRejected.get();
     }
 
 //----------------------------------------------------------------------------
@@ -193,8 +304,13 @@ public class CloudWatchWriter
      */
     private LinkedList<QueuedMessage> extractAndSortMessages()
     {
-        // TODO - check timestamps against group's discard policy
-        LinkedList<QueuedMessage> messages = new LinkedList<QueuedMessage>(unsentMessages);
+        LinkedList<QueuedMessage> messages = new LinkedList<QueuedMessage>();
+        for (Iterator<QueuedMessage> unsentItx = unsentMessages.iterator() ; unsentItx.hasNext() ; )
+        {
+            messages.add(unsentItx.next());
+            unsentItx.remove();
+        }
+
         Collections.sort(messages, new MessageComparator());
         return messages;
     }
@@ -245,10 +361,29 @@ public class CloudWatchWriter
                       .withMessage(message.message));
         }
 
-
         PutLogEventsRequest request = new PutLogEventsRequest(logGroupName, logStreamName, events)
                                       .withSequenceToken(uploadSequenceToken);
         PutLogEventsResult response = client.putLogEvents(request);
+
+        int messagesRejected = 0;
+        RejectedLogEventsInfo rejectInfo = response.getRejectedLogEventsInfo();
+        if (rejectInfo != null)
+        {
+            int expired = rejectInfo.getExpiredLogEventEndIndex() != null
+                        ? rejectInfo.getExpiredLogEventEndIndex().intValue() + 1
+                        : 0;
+            int tooOld  = rejectInfo.getTooOldLogEventEndIndex() != null
+                        ? rejectInfo.getTooOldLogEventEndIndex().intValue() + 1
+                        : 0;
+            int tooNew  = rejectInfo.getTooNewLogEventStartIndex() != null
+                        ? batch.size() - rejectInfo.getTooNewLogEventStartIndex().intValue()
+                        : 0;
+            messagesRejected = Math.max(expired, tooOld) + tooNew;
+        }
+        batchCount.incrementAndGet();
+        totalMessagesSent.addAndGet(batch.size());
+        totalMessagesRejected.addAndGet(messagesRejected);
+
         return response.getNextSequenceToken();
     }
 

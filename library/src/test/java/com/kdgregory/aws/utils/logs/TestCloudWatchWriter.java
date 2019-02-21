@@ -17,6 +17,7 @@ package com.kdgregory.aws.utils.logs;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Queue;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -24,8 +25,8 @@ import static org.junit.Assert.*;
 
 import org.apache.log4j.Level;
 
+import net.sf.kdgcommons.lang.ClassUtil;
 import net.sf.kdgcommons.lang.StringUtil;
-import static net.sf.kdgcommons.test.NumericAsserts.*;
 import static net.sf.kdgcommons.test.StringAsserts.*;
 
 import com.amazonaws.services.logs.AWSLogs;
@@ -38,7 +39,11 @@ import com.kdgregory.aws.utils.testhelpers.mocks.MockAWSLogsClient;
 public class TestCloudWatchWriter
 {
     private Log4JCapturingAppender testLog;
-    
+
+    // created per-test
+    private CloudWatchWriter writer;
+
+
     private void assertMessages(List<InputLogEvent> actual, String... expected)
     {
         assertEquals("number of messages", expected.length, actual.size());
@@ -48,6 +53,13 @@ public class TestCloudWatchWriter
         {
             assertEquals("message " + ii, expected[ii], eventItx.next().getMessage());
         }
+    }
+
+
+    private void assertUnsentMessageQueueSize(int expectedSize)
+    throws Exception
+    {
+        assertEquals("unsent messages", expectedSize, ClassUtil.getFieldValue(writer, "unsentMessages", Queue.class).size());
     }
 
 //----------------------------------------------------------------------------
@@ -73,19 +85,25 @@ public class TestCloudWatchWriter
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
 
-        CloudWatchWriter writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchWriter(client, "foo", "bar");
         writer.add("appended first");
         writer.add(now - 1000, "appended second");
         writer.flush();
 
-        assertEquals("describeStreams invocation count",    1,      mock.describeLogStreamsInvocationCount);
-        assertEquals("putLogEvents invocation count",       1,      mock.putLogEventsInvocationCount);
-        assertEquals("request included group name",         "foo",  mock.lastBatch.getLogGroupName());
-        assertEquals("request included stream name",        "bar",  mock.lastBatch.getLogStreamName());
-        assertFalse("request included sequence token",              StringUtil.isEmpty(mock.lastBatch.getSequenceToken()));
+        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
+        assertEquals("putLogEvents invocation count",       1,          mock.putLogEventsInvocationCount);
+        assertEquals("request included group name",         "foo",      mock.lastBatch.getLogGroupName());
+        assertEquals("request included stream name",        "bar",      mock.lastBatch.getLogStreamName());
+        assertFalse("request included sequence token",                  StringUtil.isEmpty(mock.lastBatch.getSequenceToken()));
+
+        assertEquals("stats: flush count",                  1,          writer.getFlushCount());
+        assertEquals("stats: batch count",                  1,          writer.getBatchCount());
+        assertEquals("stats: invalid sequence count",       0,          writer.getInvalidSequenceCount());
+        assertEquals("stats: total mesage count",           2,          writer.getTotalMessagesSent());
 
         assertMessages(mock.lastBatch.getLogEvents(), "appended second", "appended first");
 
+        assertUnsentMessageQueueSize(0);
         testLog.assertLogSize(0);
     }
 
@@ -98,7 +116,7 @@ public class TestCloudWatchWriter
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
 
-        CloudWatchWriter writer = new CloudWatchWriter(client, "argle", "bargle");
+        writer = new CloudWatchWriter(client, "argle", "bargle");
         writer.add("appended first");
         writer.add(now - 1000, "appended second");
         writer.flush();
@@ -111,6 +129,8 @@ public class TestCloudWatchWriter
 
         assertMessages(mock.lastBatch.getLogEvents(), "appended second", "appended first");
 
+        assertUnsentMessageQueueSize(0);
+
         testLog.assertLogEntry(0, Level.DEBUG, "stream.*argle.*bargle.*does not exist.*");
         testLog.assertLogEntry(1, Level.DEBUG, "creating .* log stream.*bargle.*");
         testLog.assertLogEntry(2, Level.DEBUG, "creating .* log group.*argle.*");
@@ -122,29 +142,29 @@ public class TestCloudWatchWriter
     {
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
-        CloudWatchWriter writer = new CloudWatchWriter(client, "argle", "bargle");
+        writer = new CloudWatchWriter(client, "argle", "bargle");
 
         try
         {
-            writer.add(System.currentTimeMillis() - (86400000 * 14 + 1), "bogus");
+            writer.add(System.currentTimeMillis() - (86400000 * 14 + 1000), "bogus");
             fail("accepted message > 2 weeks old");
         }
         catch (IllegalArgumentException ex)
         {
             assertRegex("too-old message exception (was: " + ex.getMessage() + ")",
-                        "message timestamp too far in past: [0-9]+ \\(limit: [0-9]+\\b\\)",
+                        "message timestamp too far in past.*argle.*bargle.*: [0-9]+; limit: [0-9]+",
                         ex.getMessage());
         }
 
         try
         {
-            writer.add(System.currentTimeMillis() + (3600000 * 2 + 1), "bogus");
+            writer.add(System.currentTimeMillis() + (3600000 * 2 + 1000), "bogus");
             fail("accepted message > 2 hours in future");
         }
         catch (IllegalArgumentException ex)
         {
             assertRegex("future message exception (was: " + ex.getMessage() + ")",
-                        "message timestamp too far in future: [0-9]+ \\(limit: [0-9]+\\b\\)",
+                        "message timestamp too far in future.*argle.*bargle.*: [0-9]+; limit: [0-9]+",
                         ex.getMessage());
         }
 
@@ -158,7 +178,7 @@ public class TestCloudWatchWriter
         catch (IllegalArgumentException ex)
         {
             assertRegex("too-large message exception (was: " + ex.getMessage() + ")",
-                        "message is too large: 1048551 bytes \\(limit: 1048550\\)",
+                        "message is too large.*argle.*bargle.*: 1048551 bytes; limit: 1048550",
                         ex.getMessage());
         }
     }
@@ -171,7 +191,7 @@ public class TestCloudWatchWriter
 
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
-        CloudWatchWriter writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchWriter(client, "foo", "bar");
 
         for (int ii = 0 ; ii < 18000 ; ii++)
         {
@@ -189,6 +209,13 @@ public class TestCloudWatchWriter
         assertEquals("last batch first message",            "7999",     mock.lastBatch.getLogEvents().get(0).getMessage());
         assertEquals("last batch last message",             "0",        mock.lastBatch.getLogEvents().get(7999).getMessage());
 
+        assertEquals("stats: flush count",                  1,          writer.getFlushCount());
+        assertEquals("stats: batch count",                  2,          writer.getBatchCount());
+        assertEquals("stats: invalid sequence count",       0,          writer.getInvalidSequenceCount());
+        assertEquals("stats: total mesage count",           18000,      writer.getTotalMessagesSent());
+
+        assertUnsentMessageQueueSize(0);
+
         testLog.assertLogSize(0);
     }
 
@@ -200,7 +227,7 @@ public class TestCloudWatchWriter
 
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
-        CloudWatchWriter writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchWriter(client, "foo", "bar");
 
         // this format means that each record (including overhead) will be 1024 bytes
         String messageFormat = StringUtil.repeat('X', 993) + " %04d";
@@ -221,6 +248,13 @@ public class TestCloudWatchWriter
         assertRegex("last batch first message",             ".* 0975",  mock.lastBatch.getLogEvents().get(0).getMessage());
         assertRegex("last batch last message",              ".* 0000",  mock.lastBatch.getLogEvents().get(975).getMessage());
 
+        assertEquals("stats: flush count",                  1,          writer.getFlushCount());
+        assertEquals("stats: batch count",                  2,          writer.getBatchCount());
+        assertEquals("stats: invalid sequence count",       0,          writer.getInvalidSequenceCount());
+        assertEquals("stats: total mesage count",           2000,       writer.getTotalMessagesSent());
+
+        assertUnsentMessageQueueSize(0);
+
         testLog.assertLogSize(0);
     }
 
@@ -232,7 +266,7 @@ public class TestCloudWatchWriter
 
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
-        CloudWatchWriter writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchWriter(client, "foo", "bar");
 
         for (int ii = 0 ; ii < 1500 ; ii++)
         {
@@ -250,6 +284,225 @@ public class TestCloudWatchWriter
         assertEquals("last batch first message",            "59",       mock.lastBatch.getLogEvents().get(0).getMessage());
         assertEquals("last batch last message",             "0",        mock.lastBatch.getLogEvents().get(59).getMessage());
 
+        assertEquals("stats: flush count",                  1,          writer.getFlushCount());
+        assertEquals("stats: batch count",                  2,          writer.getBatchCount());
+        assertEquals("stats: invalid sequence count",       0,          writer.getInvalidSequenceCount());
+        assertEquals("stats: total mesage count",           1500,       writer.getTotalMessagesSent());
+
+        assertUnsentMessageQueueSize(0);
+
         testLog.assertLogSize(0);
     }
+
+
+    @Test
+    public void testInvalidSequenceToken() throws Exception
+    {
+        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"))
+        {
+            @Override
+            public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
+            {
+                PutLogEventsResult result = super.putLogEvents(request);
+                if (putLogEventsInvocationCount < 3)
+                    throw new InvalidSequenceTokenException("");
+                else
+                    return result;
+            }
+        };
+        AWSLogs client = mock.getInstance();
+        writer = new CloudWatchWriter(client, "foo", "bar");
+
+        writer.add("test");
+        writer.flush();
+
+        assertEquals("describeStreams invocation count",    3,          mock.describeLogStreamsInvocationCount);
+        assertEquals("putLogEvents invocation count",       3,          mock.putLogEventsInvocationCount);
+        assertEquals("message written (count)",             1,          mock.lastBatch.getLogEvents().size());
+        assertEquals("message written (content)",           "test",     mock.lastBatch.getLogEvents().get(0).getMessage());
+
+        assertEquals("stats: flush count",                  1,          writer.getFlushCount());
+        assertEquals("stats: batch count",                  1,          writer.getBatchCount());
+        assertEquals("stats: invalid sequence count",       2,          writer.getInvalidSequenceCount());
+        assertEquals("stats: total mesage count",           1,          writer.getTotalMessagesSent());
+
+        assertUnsentMessageQueueSize(0);
+
+        testLog.assertLogSize(0);
+    }
+
+
+    @Test
+    public void testDataAlreadyAccepted() throws Exception
+    {
+        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"))
+        {
+            @Override
+            public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
+            {
+                putLogEventsInvocationCount++;
+                throw new DataAlreadyAcceptedException("");
+            }
+        };
+        AWSLogs client = mock.getInstance();
+        writer = new CloudWatchWriter(client, "foo", "bar");
+
+        writer.add("test");
+        writer.flush();
+
+        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
+        assertEquals("putLogEvents invocation count",       1,          mock.putLogEventsInvocationCount);
+        assertEquals("message written (count)",             0,          mock.allMessages.size());
+
+        assertEquals("stats: flush count",                  1,          writer.getFlushCount());
+        assertEquals("stats: batch count",                  0,          writer.getBatchCount());
+        assertEquals("stats: total mesage count",           0,          writer.getTotalMessagesSent());
+
+        assertUnsentMessageQueueSize(0);
+
+        testLog.assertLogSize(1);
+        testLog.assertLogEntry(0, Level.WARN, "DataAlreadyAcceptedException.* 1 .*foo.*bar");
+    }
+
+
+    @Test
+    public void testUncaughtExceptionInDescribe() throws Exception
+    {
+        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"))
+        {
+            @Override
+            public DescribeLogStreamsResult describeLogStreams(DescribeLogStreamsRequest request)
+            {
+                describeLogStreamsInvocationCount++;
+                throw new ServiceUnavailableException("");
+            }
+        };
+        AWSLogs client = mock.getInstance();
+        writer = new CloudWatchWriter(client, "foo", "bar");
+
+        writer.add("test");
+        writer.flush();
+
+        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
+        assertEquals("putLogEvents invocation count",       0,          mock.putLogEventsInvocationCount);
+        assertEquals("message written (count)",             0,          mock.allMessages.size());
+
+        assertEquals("stats: flush count",                  1,          writer.getFlushCount());
+        assertEquals("stats: batch count",                  0,          writer.getBatchCount());
+        assertEquals("stats: total mesage count",           0,          writer.getTotalMessagesSent());
+
+        assertUnsentMessageQueueSize(1);
+
+        testLog.assertLogSize(1);
+        testLog.assertLogEntry(0, Level.WARN, "ServiceUnavailableException writing to.*foo.*bar");
+    }
+
+
+    @Test
+    public void testUncaughtExceptionInPut() throws Exception
+    {
+        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"))
+        {
+            @Override
+            public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
+            {
+                putLogEventsInvocationCount++;
+                throw new ServiceUnavailableException("");
+            }
+        };
+        AWSLogs client = mock.getInstance();
+        writer = new CloudWatchWriter(client, "foo", "bar");
+
+        writer.add("test");
+        writer.flush();
+
+        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
+        assertEquals("putLogEvents invocation count",       1,          mock.putLogEventsInvocationCount);
+        assertEquals("message written (count)",             0,          mock.allMessages.size());
+
+        assertEquals("stats: flush count",                  1,          writer.getFlushCount());
+        assertEquals("stats: batch count",                  0,          writer.getBatchCount());
+        assertEquals("stats: total mesage count",           0,          writer.getTotalMessagesSent());
+
+        assertUnsentMessageQueueSize(1);
+
+        testLog.assertLogSize(1);
+        testLog.assertLogEntry(0, Level.WARN, "ServiceUnavailableException writing to.*foo.*bar");
+    }
+
+
+    @Test
+    public void testRejectedMessages() throws Exception
+    {
+        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"))
+        {
+            @Override
+            public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
+            {
+                PutLogEventsResult result = super.putLogEvents(request);
+                result.setRejectedLogEventsInfo(new RejectedLogEventsInfo()
+                                                .withTooOldLogEventEndIndex(Integer.valueOf(2))
+                                                .withExpiredLogEventEndIndex(Integer.valueOf(4))
+                                                .withTooNewLogEventStartIndex(Integer.valueOf(request.getLogEvents().size() - 3)));
+                return result;
+            }
+        };
+        AWSLogs client = mock.getInstance();
+        writer = new CloudWatchWriter(client, "foo", "bar");
+
+        for (int ii = 0 ; ii < 10 ; ii++)
+            writer.add("test " + ii);
+        writer.flush();
+
+        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
+        assertEquals("putLogEvents invocation count",       1,          mock.putLogEventsInvocationCount);
+        assertEquals("all messages passed to putLogEvents", 10,         mock.allMessages.size());
+
+        assertEquals("stats: flush count",                  1,          writer.getFlushCount());
+        assertEquals("stats: batch count",                  1,          writer.getBatchCount());
+        assertEquals("stats: messages sent",                10,         writer.getTotalMessagesSent());
+        assertEquals("stats: messages rejected",            5 + 3,      writer.getTotalMessagesRejected());
+
+        assertUnsentMessageQueueSize(0);
+
+        testLog.assertLogSize(0);
+    }
+
+
+    @Test
+    public void testShutdown() throws Exception
+    {
+        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
+        AWSLogs client = mock.getInstance();
+
+        writer = new CloudWatchWriter(client, "foo", "bar");
+        writer.add("test");
+        writer.shutdown();
+
+        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
+        assertEquals("putLogEvents invocation count",       1,          mock.putLogEventsInvocationCount);
+        assertEquals("last message",                        "test",     mock.lastBatch.getLogEvents().get(0).getMessage());
+
+        assertEquals("stats: flush count",                  1,          writer.getFlushCount());
+        assertEquals("stats: batch count",                  1,          writer.getBatchCount());
+        assertEquals("stats: total mesage count",           1,          writer.getTotalMessagesSent());
+
+        assertUnsentMessageQueueSize(0);
+
+        testLog.assertLogSize(1);
+        testLog.assertLogEntry(0, Level.DEBUG, "shutdown called.*foo.*bar.*");
+
+        try
+        {
+            writer.add("test 2");
+            fail("was able to add message after shutdown");
+        }
+        catch (IllegalStateException ex)
+        {
+            assertRegex("post-shutdown exception message",
+                        "writer has shut down.*foo.*bar.*",
+                        ex.getMessage());
+        }
+    }
+
 }
