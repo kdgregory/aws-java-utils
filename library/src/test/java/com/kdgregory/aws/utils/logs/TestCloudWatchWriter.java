@@ -18,6 +18,8 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Queue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -27,6 +29,7 @@ import org.apache.log4j.Level;
 
 import net.sf.kdgcommons.lang.ClassUtil;
 import net.sf.kdgcommons.lang.StringUtil;
+import static net.sf.kdgcommons.test.NumericAsserts.*;
 import static net.sf.kdgcommons.test.StringAsserts.*;
 
 import com.amazonaws.services.logs.AWSLogs;
@@ -503,6 +506,42 @@ public class TestCloudWatchWriter
                         "writer has shut down.*foo.*bar.*",
                         ex.getMessage());
         }
+    }
+
+
+    @Test
+    public void testBackgroundThread() throws Exception
+    {
+        ScheduledExecutorService threadpool = new ScheduledThreadPoolExecutor(1);
+        final long interval = 150;
+
+        long now = System.currentTimeMillis();
+
+        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
+        AWSLogs client = mock.getInstance();
+        writer = new CloudWatchWriter(client, "foo", "bar", threadpool, interval);
+
+        writer.add("test");
+
+        Thread.sleep(200);
+
+        long lastFlush =  writer.getLastFlushTime();
+
+        assertInRange("flush was invoked after delay",  now + 100, now + 300,               lastFlush);
+        assertEquals("putLogEvents invocation count",   1,                                  mock.putLogEventsInvocationCount);
+        assertEquals("last message",                    "test",                             mock.lastBatch.getLogEvents().get(0).getMessage());
+
+        Thread.sleep(200);
+
+        assertInRange("flush was invoked again",        lastFlush + 100, lastFlush + 300,   writer.getLastFlushTime());
+        assertEquals("putLogEvents invocation count",   1,                                  mock.putLogEventsInvocationCount);
+
+        long shutdownAt = System.currentTimeMillis();
+        writer.shutdown();
+
+        Thread.sleep(300);  // two chances to invoke
+
+        assertInRange("flush invoked immediately after shutdown", shutdownAt, shutdownAt + 50, writer.getLastFlushTime());
     }
 
 }

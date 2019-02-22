@@ -22,6 +22,8 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -48,6 +50,8 @@ public class CloudWatchWriter
     private AWSLogs client;
     private String logGroupName;
     private String logStreamName;
+    private ScheduledExecutorService executor;
+    private long interval;
 
     private LinkedBlockingDeque<QueuedMessage> unsentMessages = new LinkedBlockingDeque<QueuedMessage>();
     private volatile boolean isShutdown = false;
@@ -57,10 +61,11 @@ public class CloudWatchWriter
     private AtomicInteger invalidSequenceCount = new AtomicInteger(0);
     private AtomicLong totalMessagesSent = new AtomicLong();
     private AtomicLong totalMessagesRejected = new AtomicLong();
+    private AtomicLong lastFlushTimestamp = new AtomicLong();
 
 
     /**
-     *  Creates an instance that is called entirely under program control.
+     *  Creates an instance that is called synchronously, under program control.
      *
      *  @param  client          The service client. AWS best practice is to share a single
      *                          client instance between all consumers.
@@ -76,6 +81,34 @@ public class CloudWatchWriter
         this.client = client;
         this.logGroupName = logGroupName;
         this.logStreamName = logStreamName;
+    }
+
+
+    /**
+     *  Creates an instance that uses a background task to periodically flush the queue.
+     *
+     *  @param  client          The service client. AWS best practice is to share a single
+     *                          client instance between all consumers.
+     *  @param  logGroupName    The destination log group. This group will be created by
+     *                          {@link #flush} if it does not exist (or has been deleted
+     *                          since the last call).
+     *  @param  logStreamName   The destination log group. This group will be created by
+     *                          {@link #flush} if it does not exist (or has been deleted
+     *                          since the last call).
+     *  @param  executor        Provides a threadpool for running the background task.
+     *  @param  interval        Number of milliseconds between (scheduled invocations. The
+     *                          first invocation will be <code>interval</code> milliseconds
+     *                          from the time of construction.
+     */
+    public CloudWatchWriter(AWSLogs client, String logGroupName, String logStreamName, ScheduledExecutorService executor, long interval)
+    {
+        this.client = client;
+        this.logGroupName = logGroupName;
+        this.logStreamName = logStreamName;
+        this.executor = executor;
+        this.interval = interval;
+
+        executor.schedule(new BackgroundTask(), interval, TimeUnit.MILLISECONDS);
     }
 
 //----------------------------------------------------------------------------
@@ -157,6 +190,7 @@ public class CloudWatchWriter
     public synchronized void flush()
     {
         flushCount.incrementAndGet();
+        lastFlushTimestamp.set(System.currentTimeMillis());
 
         LinkedList<QueuedMessage> messages = extractAndSortMessages();
         if (messages.isEmpty())
@@ -270,6 +304,16 @@ public class CloudWatchWriter
     public long getTotalMessagesRejected()
     {
         return totalMessagesRejected.get();
+    }
+
+
+    /**
+     *  Returns the timestamp when {@link #flush} was last called, whether by
+     *  application or background thread. Will be 0 if never called.
+     */
+    public long getLastFlushTime()
+    {
+        return lastFlushTimestamp.get();
     }
 
 //----------------------------------------------------------------------------
@@ -429,6 +473,24 @@ public class CloudWatchWriter
             return (m1.timestamp < m2.timestamp) ? -1
                  : (m1.timestamp > m2.timestamp) ? 1
                  : 0;
+        }
+    }
+
+
+    /**
+     *  Periodically calls flush() from a background thread.
+     */
+    private class BackgroundTask
+    implements Runnable
+    {
+        @Override
+        public void run()
+        {
+            flush();
+            if (! isShutdown)
+            {
+                executor.schedule(this, interval, TimeUnit.MILLISECONDS);
+            }
         }
     }
 
