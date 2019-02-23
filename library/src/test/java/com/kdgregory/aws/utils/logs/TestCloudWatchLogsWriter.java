@@ -39,12 +39,12 @@ import com.kdgregory.aws.utils.testhelpers.Log4JCapturingAppender;
 import com.kdgregory.aws.utils.testhelpers.mocks.MockAWSLogsClient;
 
 
-public class TestCloudWatchWriter
+public class TestCloudWatchLogsWriter
 {
     private Log4JCapturingAppender testLog;
 
     // created per-test
-    private CloudWatchWriter writer;
+    private CloudWatchLogsWriter writer;
 
 
     private void assertMessages(List<InputLogEvent> actual, String... expected)
@@ -88,7 +88,7 @@ public class TestCloudWatchWriter
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
 
-        writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchLogsWriter(client, "foo", "bar");
         writer.add("appended first");
         writer.add(now - 1000, "appended second");
         writer.flush();
@@ -119,7 +119,7 @@ public class TestCloudWatchWriter
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
 
-        writer = new CloudWatchWriter(client, "argle", "bargle");
+        writer = new CloudWatchLogsWriter(client, "argle", "bargle");
         writer.add("appended first");
         writer.add(now - 1000, "appended second");
         writer.flush();
@@ -145,7 +145,7 @@ public class TestCloudWatchWriter
     {
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
-        writer = new CloudWatchWriter(client, "argle", "bargle");
+        writer = new CloudWatchLogsWriter(client, "argle", "bargle");
 
         try
         {
@@ -194,7 +194,7 @@ public class TestCloudWatchWriter
 
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
-        writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
         for (int ii = 0 ; ii < 18000 ; ii++)
         {
@@ -230,7 +230,7 @@ public class TestCloudWatchWriter
 
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
-        writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
         // this format means that each record (including overhead) will be 1024 bytes
         String messageFormat = StringUtil.repeat('X', 993) + " %04d";
@@ -269,7 +269,7 @@ public class TestCloudWatchWriter
 
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
-        writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
         for (int ii = 0 ; ii < 1500 ; ii++)
         {
@@ -314,7 +314,7 @@ public class TestCloudWatchWriter
             }
         };
         AWSLogs client = mock.getInstance();
-        writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
         writer.add("test");
         writer.flush();
@@ -348,7 +348,7 @@ public class TestCloudWatchWriter
             }
         };
         AWSLogs client = mock.getInstance();
-        writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
         writer.add("test");
         writer.flush();
@@ -381,7 +381,7 @@ public class TestCloudWatchWriter
             }
         };
         AWSLogs client = mock.getInstance();
-        writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
         writer.add("test");
         writer.flush();
@@ -414,7 +414,7 @@ public class TestCloudWatchWriter
             }
         };
         AWSLogs client = mock.getInstance();
-        writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
         writer.add("test");
         writer.flush();
@@ -451,7 +451,7 @@ public class TestCloudWatchWriter
             }
         };
         AWSLogs client = mock.getInstance();
-        writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
         for (int ii = 0 ; ii < 10 ; ii++)
             writer.add("test " + ii);
@@ -478,7 +478,7 @@ public class TestCloudWatchWriter
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
 
-        writer = new CloudWatchWriter(client, "foo", "bar");
+        writer = new CloudWatchLogsWriter(client, "foo", "bar");
         writer.add("test");
         writer.shutdown();
 
@@ -519,7 +519,7 @@ public class TestCloudWatchWriter
 
         MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("bar"));
         AWSLogs client = mock.getInstance();
-        writer = new CloudWatchWriter(client, "foo", "bar", threadpool, interval);
+        writer = new CloudWatchLogsWriter(client, "foo", "bar", threadpool, interval);
 
         writer.add("test");
 

@@ -43,7 +43,7 @@ import com.amazonaws.services.logs.model.*;
  *  logging messages for significant events (such as creating a log stream), and
  *  warning messages for unexpected exceptions.
  */
-public class CloudWatchWriter
+public class CloudWatchLogsWriter
 {
     private Log logger = LogFactory.getLog(getClass());
 
@@ -72,11 +72,11 @@ public class CloudWatchWriter
      *  @param  logGroupName    The destination log group. This group will be created by
      *                          {@link #flush} if it does not exist (or has been deleted
      *                          since the last call).
-     *  @param  logStreamName   The destination log group. This group will be created by
+     *  @param  logStreamName   The destination log stream. This stream will be created by
      *                          {@link #flush} if it does not exist (or has been deleted
      *                          since the last call).
      */
-    public CloudWatchWriter(AWSLogs client, String logGroupName, String logStreamName)
+    public CloudWatchLogsWriter(AWSLogs client, String logGroupName, String logStreamName)
     {
         this.client = client;
         this.logGroupName = logGroupName;
@@ -92,7 +92,7 @@ public class CloudWatchWriter
      *  @param  logGroupName    The destination log group. This group will be created by
      *                          {@link #flush} if it does not exist (or has been deleted
      *                          since the last call).
-     *  @param  logStreamName   The destination log group. This group will be created by
+     *  @param  logStreamName   The destination log stream. This stream will be created by
      *                          {@link #flush} if it does not exist (or has been deleted
      *                          since the last call).
      *  @param  executor        Provides a threadpool for running the background task.
@@ -100,7 +100,7 @@ public class CloudWatchWriter
      *                          first invocation will be <code>interval</code> milliseconds
      *                          from the time of construction.
      */
-    public CloudWatchWriter(AWSLogs client, String logGroupName, String logStreamName, ScheduledExecutorService executor, long interval)
+    public CloudWatchLogsWriter(AWSLogs client, String logGroupName, String logStreamName, ScheduledExecutorService executor, long interval)
     {
         this.client = client;
         this.logGroupName = logGroupName;

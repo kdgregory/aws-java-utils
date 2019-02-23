@@ -88,7 +88,7 @@ public class TestCloudWatchLogs
         
         long now = System.currentTimeMillis();
         
-        CloudWatchWriter writer = new CloudWatchWriter(client, logGroupName, logStreamName);
+        CloudWatchLogsWriter writer = new CloudWatchLogsWriter(client, logGroupName, logStreamName);
         
         for (int ii = 0 ; ii < 1000 ; ii++)
         {
