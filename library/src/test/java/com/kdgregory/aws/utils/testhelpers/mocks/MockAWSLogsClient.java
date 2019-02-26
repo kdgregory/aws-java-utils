@@ -16,6 +16,9 @@ package com.kdgregory.aws.utils.testhelpers.mocks;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.UUID;
 
 import net.sf.kdgcommons.lang.StringUtil;
@@ -41,35 +44,78 @@ extends SelfMock<AWSLogs>
     public int describeLogStreamsInvocationCount = 0;
     public int putLogEventsInvocationCount = 0;
 
+    protected String uploadSequenceToken = UUID.randomUUID().toString();
+
     public PutLogEventsRequest lastBatch;
     public List<InputLogEvent> allMessages = new ArrayList<InputLogEvent>();
 
-    protected ArrayList<String> knownLogGroupNames = new ArrayList<String>();
-    protected ArrayList<String> knownLogStreamNames = new ArrayList<String>();
-    protected int pageSize = Integer.MAX_VALUE;
-
-    protected String uploadSequenceToken = UUID.randomUUID().toString();
+    private Map<String,TreeSet<String>> groupsAndStreams = new TreeMap<String,TreeSet<String>>();
+    private int pageSize = Integer.MAX_VALUE;
 
 
     /**
-     *  Basic constructor.
+     *  Basic constructor: must call one or more of the configuration methods
+     *  for this to be useful.
      */
-    public MockAWSLogsClient(List<String> knownLogGroupNames, List<String> knownLogStreamNames)
+    public MockAWSLogsClient()
     {
         super(AWSLogs.class);
-        this.knownLogGroupNames.addAll(knownLogGroupNames);
-        this.knownLogStreamNames.addAll(knownLogStreamNames);
     }
 
 
     /**
-     *  Constructor for paginated describes. Note that the page size applies to the
-     *  raw list of groups and streams, not the filtered list.
+     *  Convenience constructor, for a single log group and stream.
      */
-    public MockAWSLogsClient(List<String> knownLogGroupNames, List<String> knownLogStreamNames, int pageSize)
+    public MockAWSLogsClient(String knownLogGroupName, String knownLogStreamName)
     {
-        this(knownLogGroupNames, knownLogStreamNames);
-        this.pageSize = pageSize;
+        this();
+        addStream(knownLogGroupName, knownLogStreamName);
+    }
+
+//----------------------------------------------------------------------------
+//  Optional configuration
+//----------------------------------------------------------------------------
+
+    /**
+     *  Adds a group and its list of streams (which may be empty).
+     */
+    public MockAWSLogsClient withGroupAndStreams(String groupName, String... streamNames)
+    {
+        addGroup(groupName);
+        for (String streamName : streamNames)
+        {
+            addStream(groupName, streamName);
+        }
+        return this;
+    }
+        
+        
+    /**
+     *  Sets the page size for paginated describes.
+     */
+    public MockAWSLogsClient withPageSize(int value)
+    {
+        this.pageSize = value;
+        return this;
+    }
+
+//----------------------------------------------------------------------------
+//  Internals
+//---------------------------------------------------------------------------
+
+    protected void addGroup(String groupName)
+    {
+        if (groupsAndStreams.containsKey(groupName))
+            return;
+
+        groupsAndStreams.put(groupName, new TreeSet<String>());
+    }
+
+
+    protected void addStream(String groupName, String streamName)
+    {
+        addGroup(groupName);
+        groupsAndStreams.get(groupName).add(streamName);
     }
 
 //----------------------------------------------------------------------------
@@ -80,10 +126,10 @@ extends SelfMock<AWSLogs>
     {
         createLogGroupInvocationCount++;
         String groupName = request.getLogGroupName();
-        if (knownLogGroupNames.contains(groupName))
+        if (groupsAndStreams.containsKey(groupName))
             throw new ResourceAlreadyExistsException("resource exists: " + groupName);
 
-        knownLogGroupNames.add(groupName);
+        addGroup(groupName);
         return new CreateLogGroupResult();
     }
 
@@ -93,14 +139,14 @@ extends SelfMock<AWSLogs>
         createLogStreamInvocationCount++;
 
         String groupName = request.getLogGroupName();
-        if (! knownLogGroupNames.contains(groupName))
+        if (! groupsAndStreams.containsKey(groupName))
             throw new ResourceNotFoundException("group does not exist: " + groupName);
 
         String streamName = request.getLogStreamName();
-        if (knownLogStreamNames.contains(streamName))
+        if (groupsAndStreams.get(groupName).contains(streamName))
             throw new ResourceAlreadyExistsException("stream already exists: " + streamName);
 
-        knownLogStreamNames.add(streamName);
+        addStream(groupName, streamName);
         return new CreateLogStreamResult();
     }
 
@@ -109,11 +155,11 @@ extends SelfMock<AWSLogs>
     {
         deleteLogGroupInvocationCount++;
         String groupName = request.getLogGroupName();
-        if (! knownLogGroupNames.contains(groupName))
+        if (! groupsAndStreams.containsKey(groupName))
         {
             throw new ResourceNotFoundException("no such group: " + groupName);
         }
-        knownLogGroupNames.remove(groupName);
+        groupsAndStreams.remove(groupName);
         return new DeleteLogGroupResult();
     }
 
@@ -121,12 +167,19 @@ extends SelfMock<AWSLogs>
     public DeleteLogStreamResult deleteLogStream(DeleteLogStreamRequest request)
     {
         deleteLogStreamInvocationCount++;
+
+        String groupName = request.getLogGroupName();
+        if (! groupsAndStreams.containsKey(groupName))
+        {
+            throw new ResourceNotFoundException("no such group: " + groupName);
+        }
+
         String streamName = request.getLogStreamName();
-        if (! knownLogStreamNames.contains(streamName))
+        if (! groupsAndStreams.get(groupName).contains(streamName))
         {
             throw new ResourceNotFoundException("no such stream: " + streamName);
         }
-        knownLogStreamNames.remove(streamName);
+        groupsAndStreams.get(groupName).remove(streamName);
         return new DeleteLogStreamResult();
     }
 
@@ -135,16 +188,18 @@ extends SelfMock<AWSLogs>
     {
         describeLogGroupsInvocationCount++;
 
+        List<String> groupNames = new ArrayList<String>(groupsAndStreams.keySet());
+
         int startOffset = StringUtil.isEmpty(request.getNextToken())
                         ? 0
                         : Integer.parseInt(request.getNextToken());
-        int endOffset = Math.min(knownLogGroupNames.size(), startOffset + pageSize);
-        String nextToken = endOffset == knownLogGroupNames.size()
+        int endOffset = Math.min(groupNames.size(), startOffset + pageSize);
+        String nextToken = endOffset == groupNames.size()
                          ? null
                          : String.valueOf(endOffset);
 
         List<LogGroup> groups = new ArrayList<LogGroup>();
-        for (String name : knownLogGroupNames.subList(startOffset, endOffset))
+        for (String name : groupNames.subList(startOffset, endOffset))
         {
             boolean include = StringUtil.isEmpty(request.getLogGroupNamePrefix())
                            || name.startsWith(request.getLogGroupNamePrefix());
@@ -160,19 +215,22 @@ extends SelfMock<AWSLogs>
     {
         describeLogStreamsInvocationCount++;
 
-        if (! knownLogGroupNames.contains(request.getLogGroupName()))
-            throw new ResourceNotFoundException("no such log group");
+        String groupName = request.getLogGroupName();
+        if (! groupsAndStreams.containsKey(groupName))
+            throw new ResourceNotFoundException("no such log group: " + groupName);
+
+        List<String> streamNames = new ArrayList<String>(groupsAndStreams.get(groupName));
 
         int startOffset = StringUtil.isEmpty(request.getNextToken())
                         ? 0
                         : Integer.parseInt(request.getNextToken());
-        int endOffset = Math.min(knownLogStreamNames.size(), startOffset + pageSize);
-        String nextToken = endOffset == knownLogStreamNames.size()
+        int endOffset = Math.min(streamNames.size(), startOffset + pageSize);
+        String nextToken = endOffset == streamNames.size()
                          ? null
                          : String.valueOf(endOffset);
 
         List<LogStream> streams = new ArrayList<LogStream>();
-        for (String name : knownLogStreamNames.subList(startOffset, endOffset))
+        for (String name : streamNames.subList(startOffset, endOffset))
         {
             boolean include = StringUtil.isEmpty(request.getLogStreamNamePrefix())
                            || name.startsWith(request.getLogStreamNamePrefix());

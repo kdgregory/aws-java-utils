@@ -94,8 +94,10 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDescribeLogGroups() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo", "bar", "baz"),
-                                                 Arrays.<String>asList());
+        MockAWSLogsClient mock = new MockAWSLogsClient()
+                                 .withGroupAndStreams("foo")
+                                 .withGroupAndStreams("bar")
+                                 .withGroupAndStreams("baz");
         AWSLogs client = mock.getInstance();
 
         List<LogGroup> groups = CloudWatchLogsUtil.describeLogGroups(client, null);
@@ -108,8 +110,10 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDescribeLogGroupsWithPrefix() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo", "bar", "baz"),
-                                                 Arrays.<String>asList());
+        MockAWSLogsClient mock = new MockAWSLogsClient()
+                                 .withGroupAndStreams("foo")
+                                 .withGroupAndStreams("bar")
+                                 .withGroupAndStreams("baz");
         AWSLogs client = mock.getInstance();
 
         List<LogGroup> groups = CloudWatchLogsUtil.describeLogGroups(client, "ba");
@@ -122,9 +126,11 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDescribeLogGroupsWithPagination() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo", "bar", "baz"),
-                                                 Arrays.<String>asList(),
-                                                 2);
+        MockAWSLogsClient mock = new MockAWSLogsClient()
+                                 .withGroupAndStreams("foo")
+                                 .withGroupAndStreams("bar")
+                                 .withGroupAndStreams("baz")
+                                 .withPageSize(2);
         AWSLogs client = mock.getInstance();
 
         List<LogGroup> groups = CloudWatchLogsUtil.describeLogGroups(client, "ba");
@@ -138,8 +144,9 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDescribeLogStreams() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo", "bar"),
-                                                 Arrays.asList("argle", "bargle", "bazzle"));
+        MockAWSLogsClient mock = new MockAWSLogsClient()
+                                 .withGroupAndStreams("foo", "argle", "bargle", "bazzle")
+                                 .withGroupAndStreams("bar");
         AWSLogs client = mock.getInstance();
 
         List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "foo", null);
@@ -152,8 +159,9 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDescribeLogStreamsWithPrefix() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo", "bar"),
-                                                 Arrays.asList("argle", "bargle", "bazzle"));
+        MockAWSLogsClient mock = new MockAWSLogsClient()
+                                 .withGroupAndStreams("foo", "argle", "bargle", "bazzle")
+                                 .withGroupAndStreams("bar");
         AWSLogs client = mock.getInstance();
 
         List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "foo", "ba");
@@ -166,9 +174,10 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDescribeLogStreamsWithPagination() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo", "bar"),
-                                                 Arrays.asList("argle", "bargle", "bazzle"),
-                                                 2);
+        MockAWSLogsClient mock = new MockAWSLogsClient()
+                                 .withGroupAndStreams("foo", "argle", "bargle", "bazzle")
+                                 .withGroupAndStreams("bar")
+                                 .withPageSize(2);
         AWSLogs client = mock.getInstance();
 
         List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "foo", "ba");
@@ -182,9 +191,10 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDescribeLogStreamsWithMissingGroup() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo", "bar"),
-                                                 Arrays.asList("argle", "bargle", "bazzle"),
-                                                 2);
+        MockAWSLogsClient mock = new MockAWSLogsClient()
+                                 .withGroupAndStreams("foo", "argle", "bargle", "bazzle")
+                                 .withGroupAndStreams("bar")
+                                 .withPageSize(2);
         AWSLogs client = mock.getInstance();
 
         List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "fribble", "ba");
@@ -197,8 +207,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testWaitUntilGroupCreated() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo", "bar", "baz"),
-                                                 Arrays.<String>asList())
+        MockAWSLogsClient mock = new MockAWSLogsClient()
         {
             @Override
             public DescribeLogGroupsResult describeLogGroups(DescribeLogGroupsRequest request)
@@ -208,7 +217,10 @@ public class TestCloudWatchLogsUtil
                 else
                     return super.describeLogGroups(request);
             }
-        };
+        }
+        .withGroupAndStreams("foo")
+        .withGroupAndStreams("bar")
+        .withGroupAndStreams("baz");
         AWSLogs client = mock.getInstance();
 
         long start = System.currentTimeMillis();
@@ -226,8 +238,10 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testWaitUntilGroupCreatedTimeout() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo", "bar", "baz"),
-                                                 Arrays.<String>asList());
+        MockAWSLogsClient mock = new MockAWSLogsClient()
+                                 .withGroupAndStreams("foo")
+                                 .withGroupAndStreams("bar")
+                                 .withGroupAndStreams("baz");
         AWSLogs client = mock.getInstance();
 
         long start = System.currentTimeMillis();
@@ -245,8 +259,10 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testWaitUntilGroupCreatedPassingPrefix() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo", "bar", "baz"),
-                                                 Arrays.<String>asList());
+        MockAWSLogsClient mock = new MockAWSLogsClient()
+                                 .withGroupAndStreams("foo")
+                                 .withGroupAndStreams("bar")
+                                 .withGroupAndStreams("baz");
         AWSLogs client = mock.getInstance();
 
         long start = System.currentTimeMillis();
@@ -264,8 +280,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testWaitUntilStreamCreated() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo", "bar"),
-                                                 Arrays.asList("argle", "bargle", "bazzle"))
+        MockAWSLogsClient mock = new MockAWSLogsClient()
         {
             @Override
             public DescribeLogStreamsResult describeLogStreams(DescribeLogStreamsRequest request)
@@ -275,7 +290,8 @@ public class TestCloudWatchLogsUtil
                 else
                     return super.describeLogStreams(request);
             }
-        };
+        }
+        .withGroupAndStreams("bar", "bargle");
         AWSLogs client = mock.getInstance();
 
         long start = System.currentTimeMillis();
@@ -293,8 +309,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testWaitUntilStreamCreatedTimeout() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo", "bar"),
-                                                 Arrays.asList("argle", "bargle", "bazzle"));
+        MockAWSLogsClient mock = new MockAWSLogsClient().withGroupAndStreams("foo");
         AWSLogs client = mock.getInstance();
 
         long start = System.currentTimeMillis();
@@ -312,8 +327,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testWaitUntilStreamCreatedPassingPrefix() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo", "bar"),
-                                                 Arrays.asList("argle", "bargle", "bazzle"));
+        MockAWSLogsClient mock = new MockAWSLogsClient().withGroupAndStreams("foo");
         AWSLogs client = mock.getInstance();
 
         LogStream stream = CloudWatchLogsUtil.waitUntilCreated(client, "foo", "ba", 50, 10);
@@ -327,7 +341,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testCreateLogGroup() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"))
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public DescribeLogGroupsResult describeLogGroups(DescribeLogGroupsRequest request)
@@ -356,7 +370,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testCreateLogGroupAlreadyExists() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"));
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle");
         AWSLogs client = mock.getInstance();
 
         LogGroup group = CloudWatchLogsUtil.createLogGroup(client, "foo", 100);
@@ -372,14 +386,14 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testCreateLogGroupOperationAborted() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"))
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public CreateLogGroupResult createLogGroup(CreateLogGroupRequest request)
             {
                 // this call won't succeed, but we'll store the group name so that describe works
                 createLogGroupInvocationCount++;
-                knownLogGroupNames.add(request.getLogGroupName());
+                addGroup(request.getLogGroupName());
                 throw new OperationAbortedException("");
             }
         };
@@ -398,7 +412,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testCreateLogGroupTimeout() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"))
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public DescribeLogGroupsResult describeLogGroups(DescribeLogGroupsRequest request)
@@ -427,7 +441,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testCreateLogStream() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"))
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public DescribeLogStreamsResult describeLogStreams(DescribeLogStreamsRequest request)
@@ -458,7 +472,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testCreateLogStreamAlreadyExists() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"));
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle");
         AWSLogs client = mock.getInstance();
 
         LogStream stream = CloudWatchLogsUtil.createLogStream(client, "foo", "argle", 100);
@@ -476,7 +490,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testCreateLogStreamTimeout() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"))
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public DescribeLogStreamsResult describeLogStreams(DescribeLogStreamsRequest request)
@@ -506,7 +520,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testCreateLogGroupAndStream() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"));
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle");
         AWSLogs client = mock.getInstance();
 
         LogStream stream = CloudWatchLogsUtil.createLogStream(client, "bar", "bargle", 100);
@@ -524,7 +538,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDeleteLogGroup() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"))
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public DescribeLogGroupsResult describeLogGroups(DescribeLogGroupsRequest request)
@@ -556,7 +570,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDeleteNonExistantLogGroup() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"));
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle");
         AWSLogs client = mock.getInstance();
 
         assertTrue(CloudWatchLogsUtil.deleteLogGroup(client, "bar", 200));
@@ -571,7 +585,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDeleteLogGroupOperatiionAborted() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"))
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public DeleteLogGroupResult deleteLogGroup(DeleteLogGroupRequest request)
@@ -594,7 +608,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDeleteLogGroupTimeout() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"))
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public DeleteLogGroupResult deleteLogGroup(DeleteLogGroupRequest request)
@@ -622,7 +636,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDeleteLogStream() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"))
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
 
             @Override
@@ -656,7 +670,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDeleteNonExistantLogStream() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"));
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle");
         AWSLogs client = mock.getInstance();
 
         assertTrue(CloudWatchLogsUtil.deleteLogStream(client, "foo", "bargle", 200));
@@ -671,7 +685,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDeleteLogStreamOperatiionAborted() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"))
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public DeleteLogStreamResult deleteLogStream(DeleteLogStreamRequest request)
@@ -694,7 +708,7 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDeleteLogStreamTimeout() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient(Arrays.asList("foo"), Arrays.asList("argle"))
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public DeleteLogStreamResult deleteLogStream(DeleteLogStreamRequest request)
