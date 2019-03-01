@@ -23,6 +23,10 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+
 import com.amazonaws.services.logs.AWSLogs;
 import com.amazonaws.services.logs.AWSLogsClientBuilder;
 import com.amazonaws.services.logs.model.*;
@@ -35,6 +39,8 @@ public class TestCloudWatchLogs
 {
     // a single instance of the client is shared between all tests
     private static AWSLogs client;
+
+    private Logger logger = LoggerFactory.getLogger(getClass());
 
 //----------------------------------------------------------------------------
 //  Pre/post operations
@@ -60,6 +66,8 @@ public class TestCloudWatchLogs
     @Test
     public void testCreationAndDeletion() throws Exception
     {
+        MDC.put("testName", "testCreationAndDeletion");
+        logger.info("starting");
 
         String namePrefix = "TestLogsUtil-testBasicOperation";
         String logGroupName = namePrefix + "-logGroup-" + UUID.randomUUID();
@@ -80,12 +88,17 @@ public class TestCloudWatchLogs
 
         assertNull("post-delete-group describeLogGroup()",      CloudWatchLogsUtil.describeLogGroup(client, logGroupName));
         assertNull("post-delete-group describeLogStream()",     CloudWatchLogsUtil.describeLogStream(client, logGroupName, logStreamName));
+
+        logger.info("finished");
     }
 
 
     @Test
     public void testWriterAndReader() throws Exception
     {
+        MDC.put("testName", "testWriterAndReader");
+        logger.info("starting");
+
         int numRecords = 1000;
         int lastIndex = numRecords - 1;
         String namePrefix = "TestLogsUtil-testWriterAndReader";
@@ -122,12 +135,17 @@ public class TestCloudWatchLogs
         assertEquals("number of records in range",  30,                                         events2.size());
         assertEquals("first event in range",        events1.get(lastIndex - 50).getMessage(),   events2.get(0).getMessage());
         assertEquals("last event in rage",          events1.get(lastIndex - 21).getMessage(),   events2.get(29).getMessage());
+
+        logger.info("finished");
     }
 
 
     @Test
     public void testWriterMultiThread() throws Exception
     {
+        MDC.put("testName", "testWriterMultiThread");
+        logger.info("starting");
+
         final int numThreads = 10;
         final int recordsPerThread = 1000;
         final int flushInterval = 200;
@@ -171,12 +189,17 @@ public class TestCloudWatchLogs
         List<OutputLogEvent> events = reader.retrieve(numThreads * recordsPerThread, 10000);
 
         assertEquals("retrieved all events", numThreads * recordsPerThread, events.size());
+
+        logger.info("finished");
     }
 
 
     @Test
     public void testReaderMultiStream() throws Exception
     {
+        MDC.put("testName", "testWriterMultiThread");
+        logger.info("testReaderMultiStream");
+
         int numRecords = 1000;
         String namePrefix = "TestLogsUtil-testWriterAndReader";
         String logGroupName = namePrefix + "-logGroup-" + UUID.randomUUID();
@@ -204,7 +227,7 @@ public class TestCloudWatchLogs
         assertEquals("first two records have same timestamp (sorted together even though originating separately)",
                      events.get(0).getTimestamp(),
                      events.get(1).getTimestamp());
+
+        logger.info("finished");
     }
-
-
 }
