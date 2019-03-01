@@ -28,7 +28,8 @@ import com.amazonaws.services.logs.AWSLogs;
 import com.amazonaws.services.logs.model.*;
 
 /**
- *  A mock client that will knows about a predefined set of groups and streams.
+ *  A mock client that knows about a predefined set of groups and streams and
+ *  can provide messages.
  */
 public class MockAWSLogsClient
 extends SelfMock<AWSLogs>
@@ -43,6 +44,7 @@ extends SelfMock<AWSLogs>
     public int describeLogGroupsInvocationCount = 0;
     public int describeLogStreamsInvocationCount = 0;
     public int putLogEventsInvocationCount = 0;
+    public int getLogEventsInvocationCount = 0;
 
     protected String uploadSequenceToken = UUID.randomUUID().toString();
 
@@ -50,7 +52,8 @@ extends SelfMock<AWSLogs>
     public List<InputLogEvent> allMessages = new ArrayList<InputLogEvent>();
 
     private Map<String,TreeSet<String>> groupsAndStreams = new TreeMap<String,TreeSet<String>>();
-    private int pageSize = Integer.MAX_VALUE;
+    private TreeMap<Long,String> messages = new TreeMap<Long,String>();
+    private int pageSize = Integer.MAX_VALUE / 2; // effectively infinite
 
 
     /**
@@ -88,10 +91,23 @@ extends SelfMock<AWSLogs>
         }
         return this;
     }
-        
-        
+
+
     /**
-     *  Sets the page size for paginated describes.
+     *  Adds a message to the list that are returned. Each message must have a
+     *  unique timestamp. There is no differentiation of messages by group or
+     *  stream.
+     */
+    public MockAWSLogsClient withMessage(long timestamp, String message)
+    {
+        messages.put(Long.valueOf(timestamp), message);
+        return this;
+    }
+
+
+
+    /**
+     *  Sets the page size for paginated operations.
      */
     public MockAWSLogsClient withPageSize(int value)
     {
@@ -118,6 +134,21 @@ extends SelfMock<AWSLogs>
         groupsAndStreams.get(groupName).add(streamName);
     }
 
+
+    protected void verifyGroup(String groupName)
+    {
+        if (! groupsAndStreams.containsKey(groupName))
+            throw new ResourceNotFoundException("missing log group: " + groupName);
+    }
+
+
+    protected void verifyStream(String groupName, String streamName)
+    {
+        verifyGroup(groupName);
+        if (! groupsAndStreams.get(groupName).contains(streamName))
+            throw new ResourceNotFoundException("missing log stream: " + streamName);
+    }
+
 //----------------------------------------------------------------------------
 //  Mock implementations
 //----------------------------------------------------------------------------
@@ -127,7 +158,7 @@ extends SelfMock<AWSLogs>
         createLogGroupInvocationCount++;
         String groupName = request.getLogGroupName();
         if (groupsAndStreams.containsKey(groupName))
-            throw new ResourceAlreadyExistsException("resource exists: " + groupName);
+            throw new ResourceAlreadyExistsException("resource already exists: " + groupName);
 
         addGroup(groupName);
         return new CreateLogGroupResult();
@@ -139,8 +170,7 @@ extends SelfMock<AWSLogs>
         createLogStreamInvocationCount++;
 
         String groupName = request.getLogGroupName();
-        if (! groupsAndStreams.containsKey(groupName))
-            throw new ResourceNotFoundException("group does not exist: " + groupName);
+        verifyGroup(groupName);
 
         String streamName = request.getLogStreamName();
         if (groupsAndStreams.get(groupName).contains(streamName))
@@ -154,11 +184,10 @@ extends SelfMock<AWSLogs>
     public DeleteLogGroupResult deleteLogGroup(DeleteLogGroupRequest request)
     {
         deleteLogGroupInvocationCount++;
+
         String groupName = request.getLogGroupName();
-        if (! groupsAndStreams.containsKey(groupName))
-        {
-            throw new ResourceNotFoundException("no such group: " + groupName);
-        }
+        verifyGroup(groupName);
+
         groupsAndStreams.remove(groupName);
         return new DeleteLogGroupResult();
     }
@@ -169,16 +198,9 @@ extends SelfMock<AWSLogs>
         deleteLogStreamInvocationCount++;
 
         String groupName = request.getLogGroupName();
-        if (! groupsAndStreams.containsKey(groupName))
-        {
-            throw new ResourceNotFoundException("no such group: " + groupName);
-        }
-
         String streamName = request.getLogStreamName();
-        if (! groupsAndStreams.get(groupName).contains(streamName))
-        {
-            throw new ResourceNotFoundException("no such stream: " + streamName);
-        }
+        verifyStream(groupName, streamName);
+
         groupsAndStreams.get(groupName).remove(streamName);
         return new DeleteLogStreamResult();
     }
@@ -216,8 +238,7 @@ extends SelfMock<AWSLogs>
         describeLogStreamsInvocationCount++;
 
         String groupName = request.getLogGroupName();
-        if (! groupsAndStreams.containsKey(groupName))
-            throw new ResourceNotFoundException("no such log group: " + groupName);
+        verifyGroup(groupName);
 
         List<String> streamNames = new ArrayList<String>(groupsAndStreams.get(groupName));
 
@@ -249,10 +270,49 @@ extends SelfMock<AWSLogs>
     public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
     {
         putLogEventsInvocationCount++;
+
+        verifyStream(request.getLogGroupName(), request.getLogStreamName());
+
         lastBatch = request;
         allMessages.addAll(request.getLogEvents());
 
         uploadSequenceToken = UUID.randomUUID().toString();
         return new PutLogEventsResult().withNextSequenceToken(uploadSequenceToken);
+    }
+
+
+    public GetLogEventsResult getLogEvents(GetLogEventsRequest request)
+    {
+        getLogEventsInvocationCount++;
+
+        verifyStream(request.getLogGroupName(), request.getLogStreamName());
+
+        long startTimestamp = (request.getStartTime() == null)
+                            ? 0
+                            : request.getStartTime().longValue();
+        long endTimestamp   = (request.getEndTime() == null)
+                            ? Long.MAX_VALUE
+                            : request.getEndTime().longValue();
+
+        List<OutputLogEvent> events = new ArrayList<OutputLogEvent>();
+        for (Map.Entry<Long,String> entry : messages.entrySet())
+        {
+            Long timestamp = entry.getKey();
+            String message = entry.getValue();
+            if ((startTimestamp <= timestamp.longValue()) && (timestamp.longValue() <= endTimestamp))
+            {
+                events.add(new OutputLogEvent().withTimestamp(timestamp).withMessage(message));
+            }
+        }
+
+        String nextToken = request.getNextToken();
+        int startOffset = (! StringUtil.isBlank(nextToken))
+                        ? Integer.parseInt(nextToken)
+                        : 0;
+        int endOffset = Math.min(events.size(), startOffset + pageSize);
+
+        return new GetLogEventsResult()
+               .withEvents(events.subList(startOffset, endOffset))
+               .withNextForwardToken(String.valueOf(endOffset));
     }
 }

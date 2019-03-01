@@ -199,7 +199,7 @@ public class CloudWatchLogsWriter
         try
         {
             String uploadSequenceToken = retrieveUploadSequenceToken();
-            while ((messages.size() > 0) && (uploadSequenceToken != null))
+            while (messages.size() > 0)
             {
                 List<QueuedMessage> batch = extractBatch(messages);
                 try
