@@ -25,16 +25,33 @@ import com.amazonaws.services.logs.model.*;
 
 
 /**
- *  Reads messages from CloudWatch one or more CloudWatch Logs streams.
+ *  Reads messages from CloudWatch Logs. Handles pagination and combines results
+ *  from multiple streams.
  */
 public class CloudWatchLogsReader
 {
     private AWSLogs client;
-    private String logGroupName;
-    private List<String> logStreamNames;
+    private List<StreamIdentifier> streamIdentifiers = new ArrayList<StreamIdentifier>();
 
     private Long startTime;
     private Long endTime;
+
+
+    /**
+     *  Creates an instance that reads from one or more named streams, which may
+     *  belong to different groups. You should rarely want to do this, as there
+     *  is no way to differentiate messages from different groups, but it may be
+     *  useful to correlate messages logged from multiple sources.
+     *
+     *  @param  client          The service client. AWS best practice is to share a single
+     *                          client instance between all consumers.
+     *  @param  logStreams      The streams to read.
+     */
+    public CloudWatchLogsReader(AWSLogs client, StreamIdentifier... logStreams)
+    {
+        this.client = client;
+        this.streamIdentifiers.addAll(Arrays.asList(logStreams));
+    }
 
 
     /**
@@ -43,13 +60,28 @@ public class CloudWatchLogsReader
      *  @param  client          The service client. AWS best practice is to share a single
      *                          client instance between all consumers.
      *  @param  logGroupName    The source log group.
-     *  @param  logStreamName2  The source log streams.
+     *  @param  logStreamNames  The source log streams.
      */
     public CloudWatchLogsReader(AWSLogs client, String logGroupName, String... logStreamNames)
     {
-        this.client = client;
-        this.logGroupName = logGroupName;
-        this.logStreamNames = new ArrayList<String>(Arrays.asList(logStreamNames));
+        this(client, StreamIdentifier.fromStreamNames(logGroupName, logStreamNames));
+    }
+
+
+    /**
+     *  Creates an instance that reads from one or more named streams in a single group,
+     *  where the stream names are extracted from stream descriptions. This is intended
+     *  for use with the output of {@link CloudWatchLogsUtil#describeStreams}.
+     *
+     *  @param  client          The service client. AWS best practice is to share a single
+     *                          client instance between all consumers.
+     *  @param  logGroupName    The source log group.
+     *  @param  logStreams      The source log streams.
+     */
+    public CloudWatchLogsReader(AWSLogs client, String logGroupName, List<LogStream> logStreams)
+    {
+
+        this(client, StreamIdentifier.fromDescriptions(logGroupName, logStreams));
     }
 
 //----------------------------------------------------------------------------
@@ -73,10 +105,62 @@ public class CloudWatchLogsReader
         return this;
     }
 
-
 //----------------------------------------------------------------------------
 //  Public API
 //----------------------------------------------------------------------------
+
+
+    /**
+     *  Holds a stream name, along with its group name. This is used internally,
+     *  and is exposed so that callers can read from independent streams.
+     */
+    public static class StreamIdentifier
+    {
+        private String groupName;
+        private String streamName;
+
+        public StreamIdentifier(String logGroupName, String logStreamName)
+        {
+            this.groupName = logGroupName;
+            this.streamName = logStreamName;
+        }
+
+        // since this class is exposed to the public, it's immutable with getters
+
+        public String getGroupName()
+        {
+            return groupName;
+        }
+
+        public String getStreamName()
+        {
+            return streamName;
+        }
+
+        // the following are used by the constructors
+
+        public static StreamIdentifier[] fromStreamNames(String logGroupName, String... logStreamNames)
+        {
+            StreamIdentifier[] result = new StreamIdentifier[logStreamNames.length];
+            for (int ii = 0 ; ii < logStreamNames.length ; ii++)
+            {
+                result[ii] = new StreamIdentifier(logGroupName, logStreamNames[ii]);
+            }
+            return result;
+        }
+
+        public static StreamIdentifier[] fromDescriptions(String logGroupName, List<LogStream> logStreams)
+        {
+            StreamIdentifier[] result = new StreamIdentifier[logStreams.size()];
+            int ii = 0;
+            for (LogStream stream : logStreams)
+            {
+                result[ii++] = new StreamIdentifier(logGroupName, stream.getLogStreamName());
+            }
+            return result;
+        }
+    }
+
 
     /**
      *  Retrieves messages from the streams. All messages are combined into a
@@ -95,9 +179,9 @@ public class CloudWatchLogsReader
     {
         List<OutputLogEvent> result = new ArrayList<OutputLogEvent>();
 
-        for (String logStreamName : logStreamNames)
+        for (StreamIdentifier streamIdentifier : streamIdentifiers)
         {
-            readFromStream(logGroupName, logStreamName, result);
+            readFromStream(streamIdentifier, result);
         }
 
         Collections.sort(result, new OutputLogEventComparator());
@@ -140,11 +224,11 @@ public class CloudWatchLogsReader
      *  Reads messages from a single stream, storing messages in the provided
      *  list.
      */
-    private void readFromStream(String groupName, String streamName, List<OutputLogEvent> output)
+    private void readFromStream(StreamIdentifier streamIdentifier, List<OutputLogEvent> output)
     {
         GetLogEventsRequest request = new GetLogEventsRequest()
-                                      .withLogGroupName(groupName)
-                                      .withLogStreamName(streamName);
+                                      .withLogGroupName(streamIdentifier.groupName)
+                                      .withLogStreamName(streamIdentifier.streamName);
         if (startTime != null)
             request.setStartTime(startTime);
 

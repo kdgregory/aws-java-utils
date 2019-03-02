@@ -15,7 +15,9 @@
 package com.kdgregory.aws.utils.logs;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.AfterClass;
@@ -41,6 +43,28 @@ public class TestCloudWatchLogs
     private static AWSLogs client;
 
     private Logger logger = LoggerFactory.getLogger(getClass());
+
+//----------------------------------------------------------------------------
+//  Helpers
+//----------------------------------------------------------------------------
+
+    /**
+     *  Asserts that all passed records are distinct. This is used for multi-thread
+     *  and multi-stream tests.
+     */
+    private void assertDistinctMessages(List<OutputLogEvent> events)
+    {
+        Set<String> messages = new HashSet<String>();
+        for (OutputLogEvent event : events)
+        {
+            String message = event.getMessage();
+            if (messages.contains(message))
+            {
+                fail("duplicate message: " + message);
+            }
+            messages.add(message);
+        }
+    }
 
 //----------------------------------------------------------------------------
 //  Pre/post operations
@@ -69,9 +93,8 @@ public class TestCloudWatchLogs
         MDC.put("testName", "testCreationAndDeletion");
         logger.info("starting");
 
-        String namePrefix = "TestLogsUtil-testBasicOperation";
-        String logGroupName = namePrefix + "-logGroup-" + UUID.randomUUID();
-        String logStreamName = namePrefix + "-logStream-" + UUID.randomUUID();
+        String logGroupName = "TestLogsUtil-testCreationAndDeletion-" + UUID.randomUUID();
+        String logStreamName = "stream-1";
 
         // this will also exercise createLogGroup()
         assertNotNull("creation succeeded",                     CloudWatchLogsUtil.createLogStream(client, logGroupName, logStreamName, 30000));
@@ -99,11 +122,11 @@ public class TestCloudWatchLogs
         MDC.put("testName", "testWriterAndReader");
         logger.info("starting");
 
+        String logGroupName = "TestLogsUtil-testWriterAndReader-" + UUID.randomUUID();
+        String logStreamName = "stream-1";
+
         int numRecords = 1000;
         int lastIndex = numRecords - 1;
-        String namePrefix = "TestLogsUtil-testWriterAndReader";
-        String logGroupName = namePrefix + "-logGroup-" + UUID.randomUUID();
-        String logStreamName = namePrefix + "-logStream-" + UUID.randomUUID();
 
         long now = System.currentTimeMillis();
 
@@ -146,12 +169,12 @@ public class TestCloudWatchLogs
         MDC.put("testName", "testWriterMultiThread");
         logger.info("starting");
 
+        final String logGroupName = "TestLogsUtil-testWriterMultiThread" + UUID.randomUUID();
+        final String logStreamName = "stream-1";
+
         final int numThreads = 10;
         final int recordsPerThread = 1000;
         final int flushInterval = 200;
-        final String namePrefix = "TestLogsUtil-testWriterMultiThread";
-        final String logGroupName = namePrefix + "-logGroup-" + UUID.randomUUID();
-        final String logStreamName = namePrefix + "-logStream-" + UUID.randomUUID();
 
         List<Thread> threads = new ArrayList<Thread>();
         for (int ii = 0 ; ii < numThreads ; ii++)
@@ -190,6 +213,8 @@ public class TestCloudWatchLogs
 
         assertEquals("retrieved all events", numThreads * recordsPerThread, events.size());
 
+        assertDistinctMessages(events);
+
         logger.info("finished");
     }
 
@@ -197,14 +222,14 @@ public class TestCloudWatchLogs
     @Test
     public void testReaderMultiStream() throws Exception
     {
-        MDC.put("testName", "testWriterMultiThread");
+        MDC.put("testName", "testReaderMultiStream");
         logger.info("testReaderMultiStream");
 
+        String logGroupName = "TestLogsUtil-testReaderMultiStream-" + UUID.randomUUID();
+        String logStreamName1 = "stream-1";
+        String logStreamName2 = "stream-2";
+
         int numRecords = 1000;
-        String namePrefix = "TestLogsUtil-testWriterAndReader";
-        String logGroupName = namePrefix + "-logGroup-" + UUID.randomUUID();
-        String logStreamName1 = namePrefix + "-logStream-" + UUID.randomUUID();
-        String logStreamName2 = namePrefix + "-logStream-" + UUID.randomUUID();
 
         long now = System.currentTimeMillis();
 
@@ -213,13 +238,13 @@ public class TestCloudWatchLogs
 
         for (int ii = 0 ; ii < numRecords ; ii++)
         {
-            writer1.add(now - 100 * ii, String.format("message %04d", ii));
-            writer2.add(now - 100 * ii, String.format("message %04d", ii));
+            writer1.add(now - 100 * ii, String.format(logGroupName + " / " + logStreamName1 + " message %04d", ii));
+            writer2.add(now - 100 * ii, String.format(logGroupName + " / " + logStreamName2 + " message %04d", ii));
         }
         writer1.flush();
         writer2.flush();
 
-        CloudWatchLogsReader reader = new CloudWatchLogsReader(client, logGroupName, logStreamName1, logStreamName1);
+        CloudWatchLogsReader reader = new CloudWatchLogsReader(client, logGroupName, logStreamName1, logStreamName2);
         List<OutputLogEvent> events = reader.retrieve(numRecords * 2, 10000);
 
         assertEquals("retrieved all records", numRecords * 2, events.size());
@@ -227,6 +252,52 @@ public class TestCloudWatchLogs
         assertEquals("first two records have same timestamp (sorted together even though originating separately)",
                      events.get(0).getTimestamp(),
                      events.get(1).getTimestamp());
+
+        assertDistinctMessages(events);
+
+        logger.info("finished");
+    }
+
+
+    @Test
+    public void testReaderMultiGroup() throws Exception
+    {
+        MDC.put("testName", "testReaderMultiGroup");
+        logger.info("testReaderMultiStream");
+
+        String logGroupNameBase = "TestLogsUtil-testReaderMultiGroup-" + UUID.randomUUID();
+        String logGroupName1 = logGroupNameBase + "-1";
+        String logGroupName2 = logGroupNameBase + "-2";
+        String logStreamName = "stream-1";
+
+        int numRecords = 1000;
+
+        long now = System.currentTimeMillis();
+
+        CloudWatchLogsWriter writer1 = new CloudWatchLogsWriter(client, logGroupName1, logStreamName);
+        CloudWatchLogsWriter writer2 = new CloudWatchLogsWriter(client, logGroupName2, logStreamName);
+
+        for (int ii = 0 ; ii < numRecords ; ii++)
+        {
+            writer1.add(now - 100 * ii, String.format(logGroupName1 + " / " + logStreamName + " message %04d", ii));
+            writer2.add(now - 100 * ii, String.format(logGroupName2 + " / " + logStreamName + " message %04d", ii));
+        }
+        writer1.flush();
+        writer2.flush();
+
+        CloudWatchLogsReader reader = new CloudWatchLogsReader(
+                                        client,
+                                        new CloudWatchLogsReader.StreamIdentifier(logGroupName1, logStreamName),
+                                        new CloudWatchLogsReader.StreamIdentifier(logGroupName2, logStreamName));
+        List<OutputLogEvent> events = reader.retrieve(numRecords * 2, 10000);
+
+        assertEquals("retrieved all records", numRecords * 2, events.size());
+
+        assertEquals("first two records have same timestamp (sorted together even though originating separately)",
+                     events.get(0).getTimestamp(),
+                     events.get(1).getTimestamp());
+
+        assertDistinctMessages(events);
 
         logger.info("finished");
     }

@@ -19,6 +19,7 @@ import java.util.List;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
+import com.amazonaws.services.logs.AWSLogs;
 import com.amazonaws.services.logs.model.*;
 
 import com.kdgregory.aws.utils.testhelpers.mocks.MockAWSLogsClient;
@@ -52,6 +53,29 @@ public class TestCloudWatchLogsReader
         List<OutputLogEvent> events = reader.retrieve();
 
         // will always call getLogEvents one time more than necessary, to determine end of stream
+
+        assertEquals("calls to getLogEvents",   2,  mock.getLogEventsInvocationCount);
+        assertEquals("number of events",        3,  events.size());
+
+        assertEvent(events, 0, 10, "first");
+        assertEvent(events, 1, 20, "second");
+        assertEvent(events, 2, 30, "third");
+    }
+
+
+    @Test
+    public void testAlternateConstructor() throws Exception
+    {
+        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+                                 .withMessage(10, "first")
+                                 .withMessage(20, "second")
+                                 .withMessage(30, "third");
+
+        AWSLogs client = mock.getInstance();
+        List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "foo", "ba");
+
+        CloudWatchLogsReader reader = new CloudWatchLogsReader(client, "foo", streams);
+        List<OutputLogEvent> events = reader.retrieve();
 
         assertEquals("calls to getLogEvents",   2,  mock.getLogEventsInvocationCount);
         assertEquals("number of events",        3,  events.size());
