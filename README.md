@@ -68,7 +68,15 @@ from later Java versions. However, it has not been tested with a Java 6 environm
 and there is no guarantee that the AWS SDK will not rely on a later version.
 
 
-## Logging
+## Operational Notes
+
+# AWS Service Clients
+
+All operations and classes must be provided with an appropriate AWS client. Per AWS docs,
+clients are intended to be long-lived, and shared between multiple threads.
+
+
+# Logging
 
 This library uses [Apache commons-logging](http://commons.apache.org/proper/commons-logging/)
 version 1.1.3, which is also a dependency of the AWS SDK. If you exlude the SDK's transitive
@@ -89,7 +97,7 @@ log4j.logger.com.kdgregory.aws.utils=OFF
 ```
 
 
-## Exceptions
+# Exceptions
 
 Where appropriate, this library catches exceptions thrown by the SDK. For example, when
 writing to CloudWatch Logs the sequence token may be invalidated by a concurrent writer.
@@ -97,3 +105,33 @@ In this case the library can transparently retry the operation.
 
 However, many exceptions are non-recoverable, and are allowed to propagate. Your code
 should always be prepared to handle exceptions thrown by the underlying APIs.
+
+
+# Batching and Background Execution
+
+Most operations are intended to be called synchronously: the calling thread will wait
+until the operation completes. In some cases, particularly classes that write to the
+service, it is more efficient to batch operations and invoke them asynchronously.
+
+Classes that support background operation provide a constructor that takes  a Java
+`ExecutorService` instance; the intention is that the caller will create a shared
+executor that will service multiple classes. The number of threads managed by this
+executor will depend on the number and frequency of background operations, but in
+general you don't need many threads: each operation will take 50-100 ms.
+
+For classes that support batched operations, the executor must be an instance of
+`ScheduledExecutorService`, and the class will also be constructed with a scheduling
+interval. The library class will perform some action (typically writing a batch of
+messages) every time the interval expires. If there is nothing to do, the background
+operation will still run but won't contact the service.
+
+In either case, if you shut down the executor service you may prevent any outstanding
+operations from completing. Library classes that support background operation provide
+a `shutdown()` method, which will attempt to complete any pending operations and then
+prevent future operations from being submitted.
+
+This caveat also applies to the application as a whole: if you call `System.exit()`
+while operations are queued, they will never complete. You can add a shutdown hook
+to guard against this case, but you can't guard against unexpected JVM termination.
+You will need to determine whether the trade-off between efficiency and certainty
+is appropriate for your application.
