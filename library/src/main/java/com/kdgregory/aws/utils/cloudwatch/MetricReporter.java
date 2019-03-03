@@ -15,13 +15,15 @@
 package com.kdgregory.aws.utils.cloudwatch;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -29,89 +31,95 @@ import org.apache.commons.logging.LogFactory;
 import com.amazonaws.services.cloudwatch.AmazonCloudWatch;
 import com.amazonaws.services.cloudwatch.model.*;
 
+
 /**
- *  Reports CloudWatch metrics. Each instance reports metrics for a single namespace,
- *  and may be configured with default dimensions for each report (for example, EC2
- *  instance ID). Individual calls to {@link #report} specify a metric name and
- *  (optional) additional dimensions.
+ *  Reports CloudWatch metrics for a single namespace.
  *  <p>
- *  Reporting can either take place inline or on a (provided) background thread.
- *  Most applications should choose the background thread, to avoid processing
- *  lags due to AWS service calls.
+ *  By default, metrics are reported as "Count", in normal resolution, and with no
+ *  dimensions. The reporter may be configured with default values for all of these
+ *  items, and individual metrics may be reported with dimensions that extend or
+ *  override the defaults.
+ *  <p>
+ *  Call {@link #add} to add metrics to a queue for reporting, and {@link #flush} to send
+ *  all queued metrics to CloudWatch. For convenience, {@link #report} will add and flush
+ *  in a single step, although it supports fewer options.
+ *  <p>
+ *  The reporter also supports background sending of metrics on a regular basis. Construct
+ *  with a <code>ScheduledExecutorService</code> and a reporting interval, and all queued
+ *  metrics will be sent using that service. Background sending is generally preferred, as
+ *  each flush may take 50 ms or more, but beware that metrics may be lost if the process
+ *  shuts down unexpectedly (or if the executor service is shut down).
  */
 public class MetricReporter
 {
+    /**
+     *  Controls the amount of logging when sending a batch.
+     */
+    public enum LoggingLevel
+    {
+        /** Disables all logging (default) */
+        NONE,
+
+        /** Minimal logging: indicates that the batch was sent, and number of metrics */
+        MINIMAL,
+
+        /** Log message includes names of metrics */
+        NAMES,
+
+        /** Each metric is reported as a separate log entry, with name, value, units, and dimensions */
+        DETAILED
+    }
+
+//----------------------------------------------------------------------------
+//  Instance variables and constructors
+//----------------------------------------------------------------------------
+
     private Log logger = LogFactory.getLog(getClass());
 
-    private Executor executor;
     private AmazonCloudWatch client;
     private String namespace;
     private Map<String,String> defaultDimensions = new TreeMap<String,String>();
-    private Integer storageResolution = Integer.valueOf(60);
+    private boolean useHighResolution = false;
     private StandardUnit unit = StandardUnit.Count;
 
+    private LinkedBlockingDeque<MetricDatum> queuedMetrics = new LinkedBlockingDeque<MetricDatum>();
 
-    /**
-     *  Base constructor.
-     *
-     *  @param executor     Used to execute service calls. This should be an application-managed
-     *                      threadpool with a small number of background threads.
-     *  @param client       The service client. AWS best practice is to create a single client
-     *                      that is then shared between all consumers.
-     *  @param namespace    The namespace for metrics reported by this instance.
-     *  @param dimensions   Default dimensions to apply to all reports.
-     */
-    public MetricReporter(Executor executor, AmazonCloudWatch client, String namespace, Map<String,String> dimensions)
-    {
-        this.executor = executor;
-        this.client = client;
-        this.namespace = namespace;
-        this.defaultDimensions.putAll(dimensions);
-    }
+    private volatile LoggingLevel batchLoggingLevel = LoggingLevel.NONE;
 
 
     /**
-     *  Convenience constructor, which has no default dimensions. This is used when you are
-     *  configuring reporters in a "fluent" style.
+     *  Constructs an instance instance that reports metrics synchronously.
      *
-     *  @param executor     Used to execute service calls. This should be an application-managed
-     *                      threadpool with a small number of background threads.
-     *  @param client       The service client. AWS best practice is to create a single client
+     *  @param  client      The service client. AWS best practice is to create a single client
      *                      that is then shared between all consumers.
-     *  @param namespace    The namespace for metrics reported by this instance.
-     */
-    public MetricReporter(Executor executor, AmazonCloudWatch client, String namespace)
-    {
-        this(executor, client, namespace, Collections.<String,String>emptyMap());
-    }
-
-
-    /**
-     *  Creates an instance that reports metrics synchonously, with default dimensions. This
-     *  variant is intended to support the use case where a single set of dimensions may be
-     *  shared between different metrics.
-     *
-     *  @param client       The service client. AWS best practice is to create a single client
-     *                      that is then shared between all consumers.
-     *  @param namespace    The namespace for metrics reported by this instance.
-     *  @param dimensions   Default dimensions to apply to all reports.
-     */
-    public MetricReporter(AmazonCloudWatch client, String namespace, Map<String,String> dimensions)
-    {
-        this(new InlineExecutor(), client, namespace, dimensions);
-    }
-
-
-    /**
-     *  Creates an instance that reports metrics synchonously.
-     *
-     *  @param client       The service client. AWS best practice is to create a single client
-     *                      that is then shared between all consumers.
-     *  @param namespace    The namespace for metrics reported by this instance.
+     *  @param  namespace   The namespace for metrics reported by this instance.
      */
     public MetricReporter(AmazonCloudWatch client, String namespace)
     {
-        this(client, namespace, Collections.<String,String>emptyMap());
+        this.client = client;
+        this.namespace = namespace;
+    }
+
+
+    /**
+     *  Base constructor for an instance that reports metrics asynchronously. Will start
+     *  reporting metrics <code>interval</code> milliseconds after construction.
+     *
+     *  @param  client      The service client. AWS best practice is to create a single client
+     *                      that is then shared between all consumers.
+     *  @param  namespace   The namespace for metrics reported by this instance.
+     *  @param  executor    Shareable threadpool used to report statistics. The size of this
+     *                      pool depends on how many reporters (or other scheduled async
+     *                      objects) use it, but generally 1 or 2 threads is sufficient.
+     *  @param  interval    Number of milliseconds between invocations of {@link #flush}.
+     *                      This value represents a tradeoff between minimizing service
+     *                      calls and potential for message loss on unexpected shutdown,
+     *                      but 500 is often appropriate.
+     */
+    public MetricReporter(AmazonCloudWatch client, String namespace, ScheduledExecutorService executor, long interval)
+    {
+        this(client, namespace);
+        executor.schedule(new ScheduledInvoker(executor, interval, this), interval, TimeUnit.MILLISECONDS);
     }
 
 //----------------------------------------------------------------------------
@@ -143,7 +151,20 @@ public class MetricReporter
      */
     public MetricReporter withHighResolution(boolean value)
     {
-        storageResolution = value ? Integer.valueOf(1) : Integer.valueOf(60);
+        useHighResolution = value;
+        return this;
+    }
+
+
+    /**
+     *  Enables (or disables) logging of each call to <code>flush()</code>.
+     *  This is useful during application development, but may be a distraction
+     *  during operations. By default, successful batches do not log; failures
+     *  are always logged.
+     */
+    public MetricReporter withBatchLogging(LoggingLevel level)
+    {
+        batchLoggingLevel = level;
         return this;
     }
 
@@ -152,39 +173,19 @@ public class MetricReporter
 //----------------------------------------------------------------------------
 
     /**
-     *  Reports a metric value, using the current timestamp and default dimensions.
+     *  Adds a metric to the queue to be reported by the next {@link #flush}.
+     *
+     *  @param  metricName  The metric's name.
+     *  @param  timestamp   The metric's timestamp.
+     *  @param  value       The metric's value.
+     *  @param  units       The metric's unit type.
+     *  @param  isHiRes     If true, report as high resolution.
+     *  @param  dimension   Overrides or supplements the default dimensions.
      */
-    public void report(String metricName, double value)
+    public void add(String metricName, long timestamp, Map<String,String> dimensions,
+                    double value, StandardUnit units, boolean isHiRes)
     {
-        report(metricName, System.currentTimeMillis(), Collections.<String,String>emptyMap(), value);
-    }
-
-
-    /**
-     *  Reports a metric value, using the current timestamp and specified dimensions.
-     */
-    public void report(String metricName, Map<String,String> dimensions, double value)
-    {
-        report(metricName, System.currentTimeMillis(), dimensions, value);
-    }
-
-
-    /**
-     *  Reports this metric value, using the specified timestamp and default dimensions.
-     */
-    public void report(String metricName, long timestamp, double value)
-    {
-        report(metricName, timestamp, Collections.<String,String>emptyMap(), value);
-    }
-
-
-    /**
-     *  Reports this metric value, using the specified timestamp and dimensions. If the
-     *  report-time dimensions have the same names as the default dimensions, they will
-     *  override the default.
-     */
-    public void report(String metricName, long timestamp, Map<String,String> dimensions, double value)
-    {
+        Integer storageResolution = isHiRes ? Integer.valueOf(1) : Integer.valueOf(60);
         MetricDatum datum = new MetricDatum()
                             .withMetricName(metricName)
                             .withTimestamp(new Date(timestamp))
@@ -192,27 +193,128 @@ public class MetricReporter
                             .withStorageResolution(storageResolution)
                             .withUnit(unit)
                             .withValue(value);
-        putMetric(datum);
+        queuedMetrics.add(datum);
     }
 
+
+    /**
+     *  Adds a metric to the queue to be reported by the next {@link #flush}.
+     *  This variant uses the current timestamp and default dimensions, units,
+     *  and storage resolution
+     */
+    public void add(String metricName, double value)
+    {
+        add(metricName, System.currentTimeMillis(), Collections.<String,String>emptyMap(), value, unit, useHighResolution);
+    }
+
+
+    /**
+     *  Adds a metric to the queue to be reported by the next {@link #flush}.
+     *  This variant uses the current timestamp and default units and storage
+     *  resolution, but allows overriding dimensions.
+     */
+    public void add(String metricName, double value, Map<String,String> dimensions)
+    {
+        add(metricName, System.currentTimeMillis(), dimensions, value, unit, useHighResolution);
+    }
+
+
+    /**
+     *  Adds a metric to the queue to be reported by the next {@link #flush}.
+     *  This variant uses the current timestamp and default storage resolution,
+     *  but allows overriding units and dimensions.
+     */
+    public void add(String metricName, double value, StandardUnit units, Map<String,String> dimensions)
+    {
+        add(metricName, System.currentTimeMillis(), dimensions, value, unit, useHighResolution);
+    }
+
+
+    /**
+     *  Flushes the current list of queued metrics. Makes a best attempt to
+     *  clear the queue, breaking it into as many separate SDK calls as
+     *  needed. Will log a warning and leave messages in the queu if unable
+     *  to send.
+     */
+    public void flush()
+    {
+        if (queuedMetrics.isEmpty())
+        {
+            if (batchLoggingLevel != LoggingLevel.NONE)
+            {
+                logger.debug(namespace + ": flush called with empty queue");
+            }
+            return;
+        }
+
+        while (! queuedMetrics.isEmpty())
+        {
+            List<MetricDatum> batch = buildBatch();
+            sendBatch(batch);
+        }
+    }
+
+
+    /**
+     *  Convenience method that adds a metric to the queue and immediately calls
+     *  {@link #flush}.
+     */
+    public void report(String metricName, double value)
+    {
+        add(metricName, value);
+        flush();
+    }
+
+
+    /**
+     *  Convenience method that adds a metric to the queue and immediately calls
+     *  {@link #flush}.
+     */
+    public void report(String metricName, double value, Map<String,String> dimensions)
+    {
+        add(metricName, value, dimensions);
+        flush();
+    }
+
+
+    /**
+     *  Convenience method that adds a metric to the queue and immediately calls
+     *  {@link #flush}.
+     */
+    public void report(String metricName, double value, StandardUnit units, Map<String,String> dimensions)
+    {
+        add(metricName, value, units, dimensions);
+        flush();
+    }
 
 //----------------------------------------------------------------------------
 //  Internals
 //----------------------------------------------------------------------------
 
     /**
-     *  This simplifies the code: no need for a null check.
+     *  Instances of this class are passed to the executor.
      */
-    private static class InlineExecutor
-    implements Executor
+    private static class ScheduledInvoker
+    implements Runnable
     {
-        @Override
-        public void execute(Runnable command)
+        private ScheduledExecutorService executor;
+        private long interval;
+        private MetricReporter reporter;
+
+        public ScheduledInvoker(ScheduledExecutorService executor, long interval, MetricReporter reporter)
         {
-            command.run();
+            this.executor = executor;
+            this.interval = interval;
+            this.reporter = reporter;
+        }
+
+        @Override
+        public void run()
+        {
+            reporter.flush();
+            executor.schedule(this, interval, TimeUnit.MILLISECONDS);
         }
     }
-
 
     /**
      *  Combines default dimensions with report-time dimensions and turns the result
@@ -233,28 +335,75 @@ public class MetricReporter
     }
 
 
-    /**
-     *  Creates the actual request and sends it off.
-     */
-    private void putMetric(final MetricDatum datum)
+    private List<MetricDatum> buildBatch()
     {
-        executor.execute(new Runnable()
+        List<MetricDatum> batch = new ArrayList<MetricDatum>();
+        Iterator<MetricDatum> queueItx = queuedMetrics.iterator();
+        while (queueItx.hasNext() && (batch.size() < 20))
         {
-            @Override
-            public void run()
+            batch.add(queueItx.next());
+            queueItx.remove();
+        }
+        return batch;
+    }
+
+
+    private void sendBatch(List<MetricDatum> batch)
+    {
+        if ((batchLoggingLevel != LoggingLevel.NONE) && logger.isDebugEnabled())
+        {
+            logger.debug(namespace + ": " + constructLogMessage(batch));
+        }
+        try
+        {
+            PutMetricDataRequest request = new PutMetricDataRequest()
+                                .withNamespace(namespace)
+                                .withMetricData(batch);
+            client.putMetricData(request);
+            batch.clear();
+        }
+        catch (Exception ex)
+        {
+            logger.warn("failed to publish " + batch.size() + " metrics for namespace " + namespace
+                        + ": " + ex.getMessage());
+            // failures are generally unrecoverable, so discard and move on
+            batch.clear();
+        }
+    }
+
+
+    /**
+     *  Constructs a logging message that depends on log level.
+     */
+    private String constructLogMessage(List<MetricDatum> batch)
+    {
+        StringBuilder sb = new StringBuilder(512);
+
+        sb.append("flush sending ").append(batch.size()).append(" metric");
+        if (batch.size() > 1)
+            sb.append("s");
+
+        if (batchLoggingLevel == LoggingLevel.NAMES)
+        {
+            sb.append(": ");
+            for (MetricDatum datum : batch)
+                sb.append(datum.getMetricName()).append(", ");
+            sb.delete(sb.length() - 2, sb.length());
+        }
+
+        if (batchLoggingLevel == LoggingLevel.DETAILED)
+        {
+            sb.append(":");
+            for (MetricDatum datum : batch)
             {
-                try
-                {
-                    PutMetricDataRequest request = new PutMetricDataRequest()
-                                        .withNamespace(namespace)
-                                        .withMetricData(Arrays.asList(datum));
-                    client.putMetricData(request);
-                }
-                catch (Exception ex)
-                {
-                    logger.warn("failed to publish metric \"" + datum.getMetricName() + "\" in namespace \"" + namespace + "\"", ex);
-                }
+                sb.append("\n    ")
+                  .append(datum.getMetricName()).append(": ")
+                  .append(datum.getValue()).append(" ")
+                  .append(datum.getUnit()).append(" @ ")
+                  .append(datum.getStorageResolution());
             }
-        });
+        }
+
+        return sb.toString();
     }
 }

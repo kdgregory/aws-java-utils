@@ -56,7 +56,7 @@ public class MetricReporterExample
                     {
                         value += rnd.nextInt(101) - 50;
                         System.out.println(Thread.currentThread().getName() + ": " + value);
-                        reporter.report("example", threadDimensions, value);
+                        reporter.report("example", value, threadDimensions);
                         ThreadUtil.sleepQuietly(10000L);
                     }
                 }
