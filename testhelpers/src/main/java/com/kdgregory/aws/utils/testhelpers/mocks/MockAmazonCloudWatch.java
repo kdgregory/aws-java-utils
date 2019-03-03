@@ -14,28 +14,19 @@
 
 package com.kdgregory.aws.utils.testhelpers.mocks;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-
-import net.sf.kdgcommons.test.SelfMock;
-
 import com.amazonaws.services.cloudwatch.AmazonCloudWatch;
-import com.amazonaws.services.cloudwatch.model.PutMetricDataRequest;
-import com.amazonaws.services.cloudwatch.model.PutMetricDataResult;
+import com.amazonaws.services.cloudwatch.model.*;
+
 
 /**
- *  A mock that records its invocations. Override to cause errors.
+ *  Mocks the following AmazonCloudWatch methods:
+ *  <ul>
+ *  <li> putMetricData()
+ *  </u>
  */
 public class MockAmazonCloudWatch
-extends SelfMock<AmazonCloudWatch>
+extends AbstractMock<AmazonCloudWatch>
 {
-    public volatile int putMetricDataInvocationCount;
-
-    public List<PutMetricDataRequest> allMetricDataRequests = Collections.synchronizedList(new ArrayList<PutMetricDataRequest>());
-    public volatile PutMetricDataRequest lastPutMetricDataRequest;
-    public volatile Thread executedOn;
-
     public MockAmazonCloudWatch()
     {
         super(AmazonCloudWatch.class);
@@ -44,10 +35,6 @@ extends SelfMock<AmazonCloudWatch>
 
     public PutMetricDataResult putMetricData(PutMetricDataRequest request)
     {
-        putMetricDataInvocationCount++;
-        allMetricDataRequests.add(request);
-        lastPutMetricDataRequest = request;
-        executedOn = Thread.currentThread();
         return new PutMetricDataResult();
     }
 }

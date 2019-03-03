@@ -72,24 +72,26 @@ public class TestMetricReporter
 
         reporter.report("example", 123.45);
 
-        assertNotNull("putMetricData() called",                                 mock.lastPutMetricDataRequest);
-        assertEquals("namespace",               DEFAULT_NAMESPACE,              mock.lastPutMetricDataRequest.getNamespace());
-        assertEquals("number of datums",        1,                              mock.lastPutMetricDataRequest.getMetricData().size());
+        PutMetricDataRequest lastRequest = mock.getLastInvocationArgAs(0, PutMetricDataRequest.class);
 
-        MetricDatum datum = mock.lastPutMetricDataRequest.getMetricData().get(0);
+        assertEquals("putMetricData invocations",       1,                              mock.getInvocationCount("putMetricData"));
+        assertEquals("namespace",                       DEFAULT_NAMESPACE,              lastRequest.getNamespace());
+        assertEquals("number of datums",                1,                              lastRequest.getMetricData().size());
 
-        assertEquals("metric name",             "example",                      datum.getMetricName());
-        assertInRange("metric timestamp",       now, now + 50,                  datum.getTimestamp().getTime());
-        assertEquals("metric resolution",       60,                             datum.getStorageResolution().intValue());
-        assertEquals("metric unit",             StandardUnit.Count.toString(),  datum.getUnit());
-        assertEquals("metric value",            123.45,                         datum.getValue().doubleValue(), 0.0);
+        MetricDatum datum = lastRequest.getMetricData().get(0);
+
+        assertEquals("metric name",                     "example",                      datum.getMetricName());
+        assertInRange("metric timestamp",               now, now + 50,                  datum.getTimestamp().getTime());
+        assertEquals("metric resolution",               60,                             datum.getStorageResolution().intValue());
+        assertEquals("metric unit",                     StandardUnit.Count.toString(),  datum.getUnit());
+        assertEquals("metric value",                    123.45,                         datum.getValue().doubleValue(), 0.0);
 
         // note: for testing we know the order that dimensions will be emitted; application code does not
 
-        assertEquals("dimension 0 name",        "argle",                        datum.getDimensions().get(0).getName());
-        assertEquals("dimension 0 value",       "bargle",                       datum.getDimensions().get(0).getValue());
-        assertEquals("dimension 1 name",        "foo",                          datum.getDimensions().get(1).getName());
-        assertEquals("dimension 1 value",       "bar",                          datum.getDimensions().get(1).getValue());
+        assertEquals("dimension 0 name",                "argle",                        datum.getDimensions().get(0).getName());
+        assertEquals("dimension 0 value",               "bargle",                       datum.getDimensions().get(0).getValue());
+        assertEquals("dimension 1 name",                "foo",                          datum.getDimensions().get(1).getName());
+        assertEquals("dimension 1 value",               "bar",                          datum.getDimensions().get(1).getValue());
 
         logCapture.assertLogSize(0);
     }
@@ -109,22 +111,24 @@ public class TestMetricReporter
         reportDimensions.put("foo", "bar");
         reporter.report("example", 123.45, reportDimensions);
 
-        assertNotNull("putMetricData() called",                                 mock.lastPutMetricDataRequest);
-        assertEquals("namespace",               DEFAULT_NAMESPACE,              mock.lastPutMetricDataRequest.getNamespace());
-        assertEquals("number of datums",        1,                              mock.lastPutMetricDataRequest.getMetricData().size());
+        PutMetricDataRequest lastRequest = mock.getLastInvocationArgAs(0, PutMetricDataRequest.class);
 
-        MetricDatum datum = mock.lastPutMetricDataRequest.getMetricData().get(0);
+        assertEquals("putMetricData invocations",       1,                              mock.getInvocationCount("putMetricData"));
+        assertEquals("namespace",                       DEFAULT_NAMESPACE,              lastRequest.getNamespace());
+        assertEquals("number of datums",                1,                              lastRequest.getMetricData().size());
 
-        assertEquals("metric name",             "example",                      datum.getMetricName());
-        assertInRange("metric timestamp",       now, now + 50,                  datum.getTimestamp().getTime());
-        assertEquals("metric resolution",       60,                             datum.getStorageResolution().intValue());
-        assertEquals("metric unit",             StandardUnit.Count.toString(),  datum.getUnit());
-        assertEquals("metric value",            123.45,                         datum.getValue().doubleValue(), 0.0);
+        MetricDatum datum = lastRequest.getMetricData().get(0);
 
-        assertEquals("dimension 0 name",        "argle",                        datum.getDimensions().get(0).getName());
-        assertEquals("dimension 0 value",       "bargle",                       datum.getDimensions().get(0).getValue());
-        assertEquals("dimension 1 name",        "foo",                          datum.getDimensions().get(1).getName());
-        assertEquals("dimension 1 value",       "bar",                          datum.getDimensions().get(1).getValue());
+        assertEquals("metric name",                     "example",                      datum.getMetricName());
+        assertInRange("metric timestamp",               now, now + 50,                  datum.getTimestamp().getTime());
+        assertEquals("metric resolution",               60,                             datum.getStorageResolution().intValue());
+        assertEquals("metric unit",                     StandardUnit.Count.toString(),  datum.getUnit());
+        assertEquals("metric value",                    123.45,                         datum.getValue().doubleValue(), 0.0);
+
+        assertEquals("dimension 0 name",                "argle",                        datum.getDimensions().get(0).getName());
+        assertEquals("dimension 0 value",               "bargle",                       datum.getDimensions().get(0).getValue());
+        assertEquals("dimension 1 name",                "foo",                          datum.getDimensions().get(1).getName());
+        assertEquals("dimension 1 value",               "bar",                          datum.getDimensions().get(1).getValue());
 
         logCapture.assertLogSize(0);
     }
@@ -140,7 +144,8 @@ public class TestMetricReporter
 
         reporter.report("example", 123);
 
-        MetricDatum firstDatum = mock.lastPutMetricDataRequest.getMetricData().get(0);
+
+        MetricDatum firstDatum = mock.getLastInvocationArgAs(0, PutMetricDataRequest.class).getMetricData().get(0);
 
         assertEquals("metric name",             "example",              firstDatum.getMetricName());
         assertEquals("metric resolution",       1,                      firstDatum.getStorageResolution().intValue());
@@ -150,7 +155,7 @@ public class TestMetricReporter
 
         reporter.report("example", 456);
 
-        MetricDatum secondDatum = mock.lastPutMetricDataRequest.getMetricData().get(0);
+        MetricDatum secondDatum = mock.getLastInvocationArgAs(0, PutMetricDataRequest.class).getMetricData().get(0);
 
         assertEquals("metric name",             "example",              secondDatum.getMetricName());
         assertEquals("metric resolution",       60,                     secondDatum.getStorageResolution().intValue());
@@ -170,7 +175,7 @@ public class TestMetricReporter
 
         reporter.report("example", 123);
 
-        MetricDatum firstDatum = mock.lastPutMetricDataRequest.getMetricData().get(0);
+        MetricDatum firstDatum = mock.getLastInvocationArgAs(0, PutMetricDataRequest.class).getMetricData().get(0);
 
         assertEquals("metric name",             "example",                      firstDatum.getMetricName());
         assertEquals("metric unit",             StandardUnit.Bytes.toString(),  firstDatum.getUnit());
@@ -190,11 +195,12 @@ public class TestMetricReporter
         reporter.add("foo", 123);
         reporter.add("bar", 456);
 
-        assertNull("mock is not called until flush()", mock.lastPutMetricDataRequest);
+        assertEquals("mock is not called until flush()",    0,   mock.getInvocationCount("putMetricData"));
 
         reporter.flush();
+        assertEquals("mock was called by flush()",          1,   mock.getInvocationCount("putMetricData"));
 
-        List<MetricDatum> metricData = mock.lastPutMetricDataRequest.getMetricData();
+        List<MetricDatum> metricData = mock.getLastInvocationArgAs(0, PutMetricDataRequest.class).getMetricData();
 
         assertEquals("metrics in batch",        2,                              metricData.size());
 
@@ -221,10 +227,10 @@ public class TestMetricReporter
         }
         reporter.flush();
 
-        assertEquals("number of batches",       2,                              mock.allMetricDataRequests.size());
+        assertEquals("putMetricData invocations",       2,                              mock.getInvocationCount("putMetricData"));
 
-        List<MetricDatum> batch0 = mock.allMetricDataRequests.get(0).getMetricData();
-        List<MetricDatum> batch1 = mock.allMetricDataRequests.get(1).getMetricData();
+        List<MetricDatum> batch0 = mock.getInvocationArgAs("putMetricData", 0, 0, PutMetricDataRequest.class).getMetricData();
+        List<MetricDatum> batch1 = mock.getInvocationArgAs("putMetricData", 1, 0, PutMetricDataRequest.class).getMetricData();
 
         assertEquals("batch 0 size",            20,                             batch0.size());
         assertEquals("batch 1 size",            10,                             batch1.size());
@@ -258,11 +264,11 @@ public class TestMetricReporter
         reporter.add("example", 123.45);
         reporter.flush();
 
-        assertTrue("putMetricData() called after first flush",      mock.putMetricDataInvocationCount == 1);
+        assertEquals("putMetricData invocations, first flush",      1,      mock.getInvocationCount("putMetricData"));
 
         reporter.flush();
 
-        assertTrue("putMetricData() not called after second flush", mock.putMetricDataInvocationCount == 1);
+        assertEquals("putMetricData invocations, second flush",     1,      mock.getInvocationCount("putMetricData"));
 
         logCapture.assertLogEntry(0, Level.WARN, "failed to publish 1.*" + DEFAULT_NAMESPACE + ".*");
     }
@@ -335,19 +341,20 @@ public class TestMetricReporter
         // easiest just to sleep until background thread invoked
         Thread.sleep(interval * 2 + 10);
 
-        assertEquals("putMetricData invocation count",          1,      mock.putMetricDataInvocationCount);
-        assertTrue("putMetricData not called on main thread",           mock.executedOn != Thread.currentThread());
+        assertEquals("putMetricData invocations, #1",       1,                  mock.getInvocationCount("putMetricData"));
+        assertTrue("putMetricData not called on main thread",                   mock.getLastInvocationThread() != Thread.currentThread());
 
-        assertNotNull("putMetricData() called",                         mock.lastPutMetricDataRequest);
-        assertEquals("namespace",               DEFAULT_NAMESPACE,      mock.lastPutMetricDataRequest.getNamespace());
-        assertEquals("number of datums",        2,                      mock.lastPutMetricDataRequest.getMetricData().size());
-        assertEquals("datum 0 name",            "foo",                  mock.lastPutMetricDataRequest.getMetricData().get(0).getMetricName());
-        assertEquals("datum 1 name",            "bar",                  mock.lastPutMetricDataRequest.getMetricData().get(1).getMetricName());
+        PutMetricDataRequest lastRequest = mock.getLastInvocationArgAs(0, PutMetricDataRequest.class);
+
+        assertEquals("namespace",                           DEFAULT_NAMESPACE,  lastRequest.getNamespace());
+        assertEquals("number of datums",                    2,                  lastRequest.getMetricData().size());
+        assertEquals("datum 0 name",                        "foo",              lastRequest.getMetricData().get(0).getMetricName());
+        assertEquals("datum 1 name",                        "bar",              lastRequest.getMetricData().get(1).getMetricName());
 
         // another sleep: once the queue is clear there shouldn't be another send
         Thread.sleep(interval * 2);
 
-        assertEquals("putMetricData invocation count #2",       1,      mock.putMetricDataInvocationCount);
+        assertEquals("putMetricData invocations, #2",       1,               mock.getInvocationCount("putMetricData"));
 
         // we'll use the log to determine that we were called multiple times ... depending on threads
         // and scheduling, we may not have an exact count
@@ -381,7 +388,6 @@ public class TestMetricReporter
             @Override
             public PutMetricDataResult putMetricData(PutMetricDataRequest request)
             {
-                putMetricDataInvocationCount++;
                 throw new RuntimeException("should be caught and discarded");
             }
         };
@@ -393,7 +399,7 @@ public class TestMetricReporter
         // sleep for at least 3 invocations
         Thread.sleep(interval * 3 + 10);
 
-        assertEquals("putMetricData invocation count",          1,      mock.putMetricDataInvocationCount);
+        assertEquals("putMetricData invocations",   1,      mock.getInvocationCount("putMetricData"));
 
         Counters<String> messageCounters = new Counters<String>();
         for (LoggingEvent logEvent : logCapture.events)
