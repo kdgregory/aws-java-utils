@@ -8,6 +8,8 @@ A collection of utility classes that operate at a higher level than the AWS Java
 This project contains three directories:
 
 * `library` is the main library of utility classes.
+* `testhelpers` contains mock objects and other classes to support testing the library. This
+  will be published in case it's useful for anyone else.
 * `examples` contains programs that demonstrate the library.
 * `integration-tests` are tests that exercise the library classes against actual AWS services.
   *Beware:* running these tests will incur service charges.

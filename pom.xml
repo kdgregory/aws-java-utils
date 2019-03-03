@@ -1,0 +1,43 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.kdgregory.aws</groupId>
+    <artifactId>driver</artifactId>
+    <version>1.11.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>AWS Java Utils - Top Level Build</name>
+
+    <description>
+        A "driver" POM that propagates build commands to its modules.
+    </description>
+
+    <url> https://github.com/kdgregory/aws-java-utils </url>
+
+    <licenses>
+        <license>
+            <name>The Apache License, Version 2.0</name>
+            <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <name>Keith D Gregory</name>
+            <email>kdgregory@users.noreply.github.com</email>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/kdgregory/aws-java-utils.git</connection>
+        <developerConnection>scm:git:git@github.com:kdgregory/aws-java-utils.git</developerConnection>
+        <url>https://github.com/kdgregory/aws-java-utils</url>
+    </scm>
+
+    <modules>
+        <module>testhelpers</module>
+        <module>library</module>
+    </modules>
+
+</project>
