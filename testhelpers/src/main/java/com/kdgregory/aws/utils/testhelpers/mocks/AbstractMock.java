@@ -23,6 +23,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static org.junit.Assert.*;
+
 import net.sf.kdgcommons.util.Counters;
 
 
@@ -31,7 +33,8 @@ import net.sf.kdgcommons.util.Counters;
  *  Common superclass for mock objects. This class implements the invocation handler
  *  and tracks invocation parameters.
  *  <p>
- *  This class is based on <code>net.sf.kdgcommons.test.SelfMock</code>.
+ *  This class is based on <code>net.sf.kdgcommons.test.SelfMock</code>, and may
+ *  become the next version of that class.
  */
 public abstract class AbstractMock<T>
 implements InvocationHandler
@@ -167,5 +170,42 @@ implements InvocationHandler
     public Thread getLastInvocationThread()
     {
         return lastInvocationThread;
+    }
+
+//----------------------------------------------------------------------------
+//  Assertions
+//----------------------------------------------------------------------------
+
+    /**
+     *  Asserts that the last invocation did not occur on the current thread
+     *  (verifies background operation).
+     */
+    public void assertLastInvocationNotOnCurrentThread()
+    {
+        assertFalse("invocation was not on current thread", Thread.currentThread() == lastInvocationThread);
+    }
+
+
+    /**
+     *  Asserts the number of times that a particular method was invoked.
+     */
+    public void assertInvocationCount(String methodName, int expected)
+    {
+        assertInvocationCount(null, methodName, expected);
+    }
+
+
+    /**
+     *  Asserts the number of times that a particular method was invoked. The
+     *  assertion method will include the provided message suffix (if not null),
+     *  which may be used to provide additional information about the assertion.
+     */
+    public void assertInvocationCount(String messageSuffix, String methodName, int expected)
+    {
+        String message = "invocation count: " + methodName;
+        if (messageSuffix != null)
+            message += ", " + messageSuffix;
+
+        assertEquals(message, expected, getInvocationCount(methodName));
     }
 }

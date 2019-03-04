@@ -72,9 +72,10 @@ public class TestMetricReporter
 
         reporter.report("example", 123.45);
 
+        mock.assertInvocationCount("putMetricData", 1);
+
         PutMetricDataRequest lastRequest = mock.getLastInvocationArgAs(0, PutMetricDataRequest.class);
 
-        assertEquals("putMetricData invocations",       1,                              mock.getInvocationCount("putMetricData"));
         assertEquals("namespace",                       DEFAULT_NAMESPACE,              lastRequest.getNamespace());
         assertEquals("number of datums",                1,                              lastRequest.getMetricData().size());
 
@@ -111,9 +112,10 @@ public class TestMetricReporter
         reportDimensions.put("foo", "bar");
         reporter.report("example", 123.45, reportDimensions);
 
+        mock.assertInvocationCount("putMetricData", 1);
+
         PutMetricDataRequest lastRequest = mock.getLastInvocationArgAs(0, PutMetricDataRequest.class);
 
-        assertEquals("putMetricData invocations",       1,                              mock.getInvocationCount("putMetricData"));
         assertEquals("namespace",                       DEFAULT_NAMESPACE,              lastRequest.getNamespace());
         assertEquals("number of datums",                1,                              lastRequest.getMetricData().size());
 
@@ -143,7 +145,6 @@ public class TestMetricReporter
                                   .withHighResolution(true);
 
         reporter.report("example", 123);
-
 
         MetricDatum firstDatum = mock.getLastInvocationArgAs(0, PutMetricDataRequest.class).getMetricData().get(0);
 
@@ -195,10 +196,11 @@ public class TestMetricReporter
         reporter.add("foo", 123);
         reporter.add("bar", 456);
 
-        assertEquals("mock is not called until flush()",    0,   mock.getInvocationCount("putMetricData"));
+        mock.assertInvocationCount("before flush", "putMetricData", 0);
 
         reporter.flush();
-        assertEquals("mock was called by flush()",          1,   mock.getInvocationCount("putMetricData"));
+
+        mock.assertInvocationCount("after flush", "putMetricData", 1);
 
         List<MetricDatum> metricData = mock.getLastInvocationArgAs(0, PutMetricDataRequest.class).getMetricData();
 
@@ -227,7 +229,7 @@ public class TestMetricReporter
         }
         reporter.flush();
 
-        assertEquals("putMetricData invocations",       2,                              mock.getInvocationCount("putMetricData"));
+        mock.assertInvocationCount("putMetricData", 2);
 
         List<MetricDatum> batch0 = mock.getInvocationArgAs("putMetricData", 0, 0, PutMetricDataRequest.class).getMetricData();
         List<MetricDatum> batch1 = mock.getInvocationArgAs("putMetricData", 1, 0, PutMetricDataRequest.class).getMetricData();
@@ -264,11 +266,11 @@ public class TestMetricReporter
         reporter.add("example", 123.45);
         reporter.flush();
 
-        assertEquals("putMetricData invocations, first flush",      1,      mock.getInvocationCount("putMetricData"));
+        mock.assertInvocationCount("after first flush", "putMetricData", 1);
 
         reporter.flush();
 
-        assertEquals("putMetricData invocations, second flush",     1,      mock.getInvocationCount("putMetricData"));
+        mock.assertInvocationCount("after second flush", "putMetricData", 1);
 
         logCapture.assertLogEntry(0, Level.WARN, "failed to publish 1.*" + DEFAULT_NAMESPACE + ".*");
     }
@@ -341,8 +343,8 @@ public class TestMetricReporter
         // easiest just to sleep until background thread invoked
         Thread.sleep(interval * 2 + 10);
 
-        assertEquals("putMetricData invocations, #1",       1,                  mock.getInvocationCount("putMetricData"));
-        assertTrue("putMetricData not called on main thread",                   mock.getLastInvocationThread() != Thread.currentThread());
+        mock.assertInvocationCount("after first sleep", "putMetricData", 1);
+        mock.assertLastInvocationNotOnCurrentThread();
 
         PutMetricDataRequest lastRequest = mock.getLastInvocationArgAs(0, PutMetricDataRequest.class);
 
@@ -354,7 +356,7 @@ public class TestMetricReporter
         // another sleep: once the queue is clear there shouldn't be another send
         Thread.sleep(interval * 2);
 
-        assertEquals("putMetricData invocations, #2",       1,               mock.getInvocationCount("putMetricData"));
+        mock.assertInvocationCount("after second sleep", "putMetricData", 1);
 
         // we'll use the log to determine that we were called multiple times ... depending on threads
         // and scheduling, we may not have an exact count
