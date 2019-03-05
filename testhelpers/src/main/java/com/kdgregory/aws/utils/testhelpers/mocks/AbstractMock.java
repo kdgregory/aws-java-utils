@@ -15,6 +15,7 @@
 package com.kdgregory.aws.utils.testhelpers.mocks;
 
 import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
@@ -105,6 +106,10 @@ implements InvocationHandler
         catch (IllegalAccessException ex)
         {
             throw new RuntimeException("illegal access exception when invoking: " + method.getName(), ex);
+        }
+        catch (InvocationTargetException ex)
+        {
+            throw ex.getCause();
         }
     }
 
