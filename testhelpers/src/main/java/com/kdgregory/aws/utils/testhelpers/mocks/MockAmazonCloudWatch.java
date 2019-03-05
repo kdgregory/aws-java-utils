@@ -14,6 +14,8 @@
 
 package com.kdgregory.aws.utils.testhelpers.mocks;
 
+import java.util.List;
+
 import com.amazonaws.services.cloudwatch.AmazonCloudWatch;
 import com.amazonaws.services.cloudwatch.model.*;
 
@@ -36,5 +38,26 @@ extends AbstractMock<AmazonCloudWatch>
     public PutMetricDataResult putMetricData(PutMetricDataRequest request)
     {
         return new PutMetricDataResult();
+    }
+
+//----------------------------------------------------------------------------
+//  Accessor API
+//----------------------------------------------------------------------------
+
+    public PutMetricDataRequest getLastPutRequest()
+    {
+        return getLastInvocationArgAs(0, PutMetricDataRequest.class);
+    }
+
+
+    public MetricDatum getDatumFromLastPut(int index)
+    {
+        return getLastPutRequest().getMetricData().get(index);
+    }
+
+
+    public List<MetricDatum> getDataFromSavedPut(int index)
+    {
+         return getInvocationArgAs("putMetricData", index, 0, PutMetricDataRequest.class).getMetricData();
     }
 }

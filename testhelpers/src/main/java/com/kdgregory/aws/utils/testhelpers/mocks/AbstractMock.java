@@ -32,7 +32,8 @@ import net.sf.kdgcommons.util.Counters;
 
 /**
  *  Common superclass for mock objects. This class implements the invocation handler
- *  and tracks invocation parameters.
+ *  and tracks invocation parameters. Subclasses should put "friendly" wrappers around
+ *  the argument-retrieval functions.
  *  <p>
  *  This class is based on <code>net.sf.kdgcommons.test.SelfMock</code>, and may
  *  become the next version of that class.
