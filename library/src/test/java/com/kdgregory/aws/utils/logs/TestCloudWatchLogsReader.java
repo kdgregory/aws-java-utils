@@ -54,8 +54,8 @@ public class TestCloudWatchLogsReader
 
         // will always call getLogEvents one time more than necessary, to determine end of stream
 
-        assertEquals("calls to getLogEvents",   2,  mock.getLogEventsInvocationCount);
-        assertEquals("number of events",        3,  events.size());
+        mock.assertInvocationCount("getLogEvents",  2);
+        assertEquals("number of events",            3,  events.size());
 
         assertEvent(events, 0, 10, "first");
         assertEvent(events, 1, 20, "second");
@@ -77,8 +77,8 @@ public class TestCloudWatchLogsReader
         CloudWatchLogsReader reader = new CloudWatchLogsReader(client, "foo", streams);
         List<OutputLogEvent> events = reader.retrieve();
 
-        assertEquals("calls to getLogEvents",   2,  mock.getLogEventsInvocationCount);
-        assertEquals("number of events",        3,  events.size());
+        mock.assertInvocationCount("getLogEvents",  2);
+        assertEquals("number of events",            3,  events.size());
 
         assertEvent(events, 0, 10, "first");
         assertEvent(events, 1, 20, "second");
@@ -98,8 +98,8 @@ public class TestCloudWatchLogsReader
         CloudWatchLogsReader reader = new CloudWatchLogsReader(mock.getInstance(), "foo", "bar");
         List<OutputLogEvent> events = reader.retrieve();
 
-        assertEquals("calls to getLogEvents",   4,  mock.getLogEventsInvocationCount);
-        assertEquals("number of events",        3,  events.size());
+        mock.assertInvocationCount("getLogEvents",  4);
+        assertEquals("number of events",            3,  events.size());
 
         assertEvent(events, 0, 10, "first");
         assertEvent(events, 1, 20, "second");
@@ -119,8 +119,8 @@ public class TestCloudWatchLogsReader
                                       .withTimeRange(15L, 25L);
         List<OutputLogEvent> events1 = reader.retrieve();
 
-        assertEquals("calls to getLogEvents",   2,  mock.getLogEventsInvocationCount);
-        assertEquals("number of events",        1,  events1.size());
+        mock.assertInvocationCount("getLogEvents",  2);
+        assertEquals("number of events",            1,  events1.size());
 
         assertEvent(events1, 0, 20, "second");
 
@@ -146,8 +146,8 @@ public class TestCloudWatchLogsReader
         CloudWatchLogsReader reader = new CloudWatchLogsReader(mock.getInstance(), "foo", "bar");
         List<OutputLogEvent> events = reader.retrieve();
 
-        assertEquals("calls to getLogEvents",   2,  mock.getLogEventsInvocationCount);
-        assertEquals("number of events",        0,  events.size());
+        mock.assertInvocationCount("getLogEvents",  2);
+        assertEquals("number of events",            0,  events.size());
     }
 
 
@@ -159,8 +159,8 @@ public class TestCloudWatchLogsReader
         CloudWatchLogsReader reader = new CloudWatchLogsReader(mock.getInstance(), "zippy", "bar");
         List<OutputLogEvent> events = reader.retrieve();
 
-        assertEquals("calls to getLogEvents",   1,  mock.getLogEventsInvocationCount);
-        assertEquals("number of events",        0,  events.size());
+        mock.assertInvocationCount("getLogEvents",  1);
+        assertEquals("number of events",            0,  events.size());
     }
 
 
@@ -172,7 +172,7 @@ public class TestCloudWatchLogsReader
         CloudWatchLogsReader reader = new CloudWatchLogsReader(mock.getInstance(), "foo", "bargle");
         List<OutputLogEvent> events = reader.retrieve();
 
-        assertEquals("calls to getLogEvents",   1,  mock.getLogEventsInvocationCount);
-        assertEquals("number of events",        0,  events.size());
+        mock.assertInvocationCount("getLogEvents",  1);
+        assertEquals("number of events",            0,  events.size());
     }
 }

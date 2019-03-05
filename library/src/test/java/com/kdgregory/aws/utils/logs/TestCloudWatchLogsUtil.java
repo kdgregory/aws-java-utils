@@ -135,7 +135,7 @@ public class TestCloudWatchLogsUtil
 
         List<LogGroup> groups = CloudWatchLogsUtil.describeLogGroups(client, "ba");
         assertLogGroupNames(groups, "bar", "baz");
-        assertEquals("describeLogGroups invocation count", 2, mock.describeLogGroupsInvocationCount);
+        mock.assertInvocationCount("describeLogGroups", 2);
 
         testLog.assertLogSize(0);
     }
@@ -182,7 +182,7 @@ public class TestCloudWatchLogsUtil
 
         List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "foo", "ba");
         assertLogStreamNames(streams, "bargle", "bazzle");
-        assertEquals("describeLogStreams invocation count", 2, mock.describeLogStreamsInvocationCount);
+        mock.assertInvocationCount("describeLogStreams", 2);
 
         testLog.assertLogSize(0);
     }
@@ -212,7 +212,7 @@ public class TestCloudWatchLogsUtil
             @Override
             public DescribeLogGroupsResult describeLogGroups(DescribeLogGroupsRequest request)
             {
-                if (describeLogGroupsInvocationCount++ < 5)
+                if (getInvocationCount("describeLogGroups") < 5)
                     return new DescribeLogGroupsResult().withLogGroups();
                 else
                     return super.describeLogGroups(request);
@@ -228,8 +228,8 @@ public class TestCloudWatchLogsUtil
         long finish = System.currentTimeMillis();
 
         assertNotNull("found log group", group);
-        assertTrue("made multiple describe attempts", mock.describeLogGroupsInvocationCount > 1);
-        assertInRange("waited between attempts", 50, 100, (finish - start));
+        assertTrue("made multiple describe attempts", mock.getInvocationCount("describeLogGroups") > 1);
+        assertInRange("waited between attempts", 40, 100, (finish - start));
 
         testLog.assertLogSize(0);
     }
@@ -249,7 +249,7 @@ public class TestCloudWatchLogsUtil
         long finish = System.currentTimeMillis();
 
         assertNull("did not find log group",            group);
-        assertTrue("made multiple describe attempts",               mock.describeLogGroupsInvocationCount > 1);
+        assertTrue("made multiple describe attempts",               mock.getInvocationCount("describeLogGroups") > 1);
         assertInRange("waited between attempts",        80, 120,    (finish - start));
 
         testLog.assertLogEntry(0, Level.WARN, "timeout expired.*log group.*biff");
@@ -270,7 +270,7 @@ public class TestCloudWatchLogsUtil
         long finish = System.currentTimeMillis();
 
         assertNull("did not find log group",            group);
-        assertTrue("made multiple describe attempts",               mock.describeLogGroupsInvocationCount > 1);
+        assertTrue("made multiple describe attempts",               mock.getInvocationCount("describeLogGroups") > 1);
         assertInRange("waited between attempts",        30, 80,     (finish - start));
 
         testLog.assertLogEntry(0, Level.WARN, "timeout expired.*log group.*ba");
@@ -285,7 +285,7 @@ public class TestCloudWatchLogsUtil
             @Override
             public DescribeLogStreamsResult describeLogStreams(DescribeLogStreamsRequest request)
             {
-                if (describeLogStreamsInvocationCount++ < 5)
+                if (getInvocationCount("describeLogStreams") < 5)
                     return new DescribeLogStreamsResult().withLogStreams();
                 else
                     return super.describeLogStreams(request);
@@ -299,8 +299,8 @@ public class TestCloudWatchLogsUtil
         long finish = System.currentTimeMillis();
 
         assertNotNull("found log stream", stream);
-        assertTrue("made multiple describe attempts", mock.describeLogStreamsInvocationCount > 1);
-        assertInRange("waited between attempts", 50, 100, (finish - start));
+        assertTrue("made multiple describe attempts", mock.getInvocationCount("describeLogStreams") > 1);
+        assertInRange("waited between attempts", 40, 100, (finish - start));
 
         testLog.assertLogSize(0);
     }
@@ -317,7 +317,7 @@ public class TestCloudWatchLogsUtil
         long finish = System.currentTimeMillis();
 
         assertNull("did not find log stream", stream);
-        assertTrue("made multiple describe attempts", mock.describeLogStreamsInvocationCount > 1);
+        assertTrue("made multiple describe attempts", mock.getInvocationCount("describeLogStreams") > 1);
         assertInRange("waited between attempts", 80, 120, (finish - start));
 
         testLog.assertLogEntry(0, Level.WARN, "timeout expired.*log stream.*biff");
@@ -341,12 +341,14 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testCreateLogGroup() throws Exception
     {
+        // assumes CloudWatchLogsUtil.RESOURCE_TRANSITION_DESCRIBE_INTERVAL == 50
+
         MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public DescribeLogGroupsResult describeLogGroups(DescribeLogGroupsRequest request)
             {
-                if (describeLogGroupsInvocationCount++ == 0)
+                if (getInvocationCount("describeLogGroups") < 3)
                     return new DescribeLogGroupsResult().withLogGroups();
                 else
                     return super.describeLogGroups(request);
@@ -355,13 +357,13 @@ public class TestCloudWatchLogsUtil
         AWSLogs client = mock.getInstance();
 
         long start = System.currentTimeMillis();
-        LogGroup group = CloudWatchLogsUtil.createLogGroup(client, "bar", 100);
+        LogGroup group = CloudWatchLogsUtil.createLogGroup(client, "bar", 150);
         long finish = System.currentTimeMillis();
 
         assertEquals("returned LogGroup object",            "bar",      group.getLogGroupName());
-        assertEquals("createLogGroup invocation count",     1,          mock.createLogGroupInvocationCount);
-        assertTrue("made multiple describes",                           mock.describeLogGroupsInvocationCount > 1);
-        assertInRange("waited between describes",           20, 90,     (finish - start));
+        mock.assertInvocationCount("createLogGroup",        1);
+        mock.assertInvocationCount("describeLogGroups",     3);
+        assertInRange("waited between describes",           80, 120,    (finish - start));
 
         testLog.assertLogEntry(0, Level.DEBUG, "creating.*log group.*bar");
     }
@@ -376,8 +378,8 @@ public class TestCloudWatchLogsUtil
         LogGroup group = CloudWatchLogsUtil.createLogGroup(client, "foo", 100);
 
         assertEquals("returned LogGroup object",            "foo",  group.getLogGroupName());
-        assertEquals("createLogGroup invocation count",     1,      mock.createLogGroupInvocationCount);
-        assertEquals("describeLogGroups invocation count",  1,      mock.describeLogGroupsInvocationCount);
+        mock.assertInvocationCount("createLogGroup",        1);
+        mock.assertInvocationCount("describeLogGroups",     1);
 
         testLog.assertLogEntry(0, Level.DEBUG, "creating.*log group.*foo");
     }
@@ -392,7 +394,6 @@ public class TestCloudWatchLogsUtil
             public CreateLogGroupResult createLogGroup(CreateLogGroupRequest request)
             {
                 // this call won't succeed, but we'll store the group name so that describe works
-                createLogGroupInvocationCount++;
                 addGroup(request.getLogGroupName());
                 throw new OperationAbortedException("");
             }
@@ -402,8 +403,8 @@ public class TestCloudWatchLogsUtil
         LogGroup group = CloudWatchLogsUtil.createLogGroup(client, "bar", 100);
 
         assertEquals("returned LogGroup object",            "bar",      group.getLogGroupName());
-        assertEquals("createLogGroup invocation count",     1,          mock.createLogGroupInvocationCount);
-        assertEquals("describeLogGroups invocation count",  1,          mock.describeLogGroupsInvocationCount);
+        mock.assertInvocationCount("createLogGroup",        1);
+        mock.assertInvocationCount("describeLogGroups",     1);
 
         testLog.assertLogEntry(0, Level.DEBUG, "creating.*log group.*bar");
     }
@@ -417,8 +418,7 @@ public class TestCloudWatchLogsUtil
             @Override
             public DescribeLogGroupsResult describeLogGroups(DescribeLogGroupsRequest request)
             {
-                // will never complete
-                describeLogGroupsInvocationCount++;
+                // we'll never see the group we just created
                 return new DescribeLogGroupsResult().withLogGroups();
             }
         };
@@ -429,9 +429,9 @@ public class TestCloudWatchLogsUtil
         long finish = System.currentTimeMillis();
 
         assertNull("did not return anything",                           group);
-        assertEquals("createLogGroup invocation count",     1,          mock.createLogGroupInvocationCount);
-        assertTrue("made multiple describes",                           mock.describeLogGroupsInvocationCount > 1);
-        assertInRange("waited between describes",           150, 250,   (finish - start));
+        mock.assertInvocationCount("createLogGroup",        1);
+        assertTrue("made multiple describes",                           mock.getInvocationCount("describeLogGroups") > 1);
+        assertInRange("waited between describes",           160, 210,   (finish - start));
 
         testLog.assertLogEntry(0, Level.DEBUG, "creating.*log group.*bar");
         testLog.assertLogEntry(1, Level.WARN, "timeout expired.*log group.*bar");
@@ -441,12 +441,14 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testCreateLogStream() throws Exception
     {
+        // assumes CloudWatchLogsUtil.RESOURCE_TRANSITION_DESCRIBE_INTERVAL == 50
+
         MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public DescribeLogStreamsResult describeLogStreams(DescribeLogStreamsRequest request)
             {
-                if (describeLogStreamsInvocationCount++ == 0)
+                if (getInvocationCount("describeLogStreams") < 3)
                     return new DescribeLogStreamsResult().withLogStreams();
                 else
                     return super.describeLogStreams(request);
@@ -455,15 +457,15 @@ public class TestCloudWatchLogsUtil
         AWSLogs client = mock.getInstance();
 
         long start = System.currentTimeMillis();
-        LogStream stream = CloudWatchLogsUtil.createLogStream(client, "foo", "bargle", 100);
+        LogStream stream = CloudWatchLogsUtil.createLogStream(client, "foo", "bargle", 150);
         long finish = System.currentTimeMillis();
 
         assertEquals("returned LogStream object",           "bargle",   stream.getLogStreamName());
-        assertEquals("describeLogGroups invocation count",  1,          mock.describeLogGroupsInvocationCount);
-        assertEquals("describeLogStreams invocation count", 3,          mock.describeLogStreamsInvocationCount);
-        assertEquals("createLogGroup invocation count",     0,          mock.createLogGroupInvocationCount);
-        assertEquals("createLogStream invocation count",    1,          mock.createLogStreamInvocationCount);
-        assertInRange("waited between describes",           20, 90,     (finish - start));
+        mock.assertInvocationCount("describeLogGroups",     1);
+        mock.assertInvocationCount("describeLogStreams",    3);
+        mock.assertInvocationCount("createLogGroup",        0);
+        mock.assertInvocationCount("createLogStream",       1);
+        assertInRange("waited between describes",           80, 120,    (finish - start));
 
         testLog.assertLogEntry(0, Level.DEBUG, "creating.*log stream.*foo.*bargle");
     }
@@ -478,10 +480,10 @@ public class TestCloudWatchLogsUtil
         LogStream stream = CloudWatchLogsUtil.createLogStream(client, "foo", "argle", 100);
 
         assertEquals("returned LogStream object",           "argle",    stream.getLogStreamName());
-        assertEquals("describeLogGroups invocation count",  1,          mock.describeLogGroupsInvocationCount);
-        assertEquals("describeLogStreams invocation count", 1,          mock.describeLogStreamsInvocationCount);
-        assertEquals("createLogGroup invocation count",     0,          mock.createLogGroupInvocationCount);
-        assertEquals("createLogStream invocation count",    1,          mock.createLogStreamInvocationCount);
+        mock.assertInvocationCount("describeLogGroups",     1);
+        mock.assertInvocationCount("describeLogStreams",    1);
+        mock.assertInvocationCount("createLogGroup",        0);
+        mock.assertInvocationCount("createLogStream",       1);
 
         testLog.assertLogEntry(0, Level.DEBUG, "creating.*log stream.*foo.*argle");
     }
@@ -495,7 +497,6 @@ public class TestCloudWatchLogsUtil
             @Override
             public DescribeLogStreamsResult describeLogStreams(DescribeLogStreamsRequest request)
             {
-                describeLogStreamsInvocationCount++;
                 return new DescribeLogStreamsResult().withLogStreams();
             }
         };
@@ -506,11 +507,11 @@ public class TestCloudWatchLogsUtil
         long finish = System.currentTimeMillis();
 
         assertNull("did not return LogStream object",                   stream);
-        assertEquals("describeLogGroups invocation count",  1,          mock.describeLogGroupsInvocationCount);
-        assertTrue("multiple describeLogStreams calls",                 mock.describeLogStreamsInvocationCount > 2);
-        assertEquals("createLogGroup invocation count",     0,          mock.createLogGroupInvocationCount);
-        assertEquals("createLogStream invocation count",    1,          mock.createLogStreamInvocationCount);
-        assertInRange("waited between describes",           150, 250,   (finish - start));
+        mock.assertInvocationCount("describeLogGroups",     1);
+        assertTrue("multiple describeLogStreams calls",                 mock.getInvocationCount("describeLogStreams") > 2);
+        mock.assertInvocationCount("createLogGroup",        0);
+        mock.assertInvocationCount("createLogStream",       1);
+        assertInRange("waited between describes",           160, 210,   (finish - start));
 
         testLog.assertLogEntry(0, Level.DEBUG, "creating.*log stream.*foo.*bargle");
         testLog.assertLogEntry(1, Level.WARN, "timeout expired.*log stream.*bargle");
@@ -526,10 +527,10 @@ public class TestCloudWatchLogsUtil
         LogStream stream = CloudWatchLogsUtil.createLogStream(client, "bar", "bargle", 100);
 
         assertEquals("returned LogStream object",           "bargle",   stream.getLogStreamName());
-        assertEquals("describeLogGroups invocation count",  2,          mock.describeLogGroupsInvocationCount);
-        assertEquals("describeLogStreams invocation count", 1,          mock.describeLogStreamsInvocationCount);
-        assertEquals("createLogGroup invocation count",     1,          mock.createLogGroupInvocationCount);
-        assertEquals("createLogStream invocation count",    1,          mock.createLogStreamInvocationCount);
+        mock.assertInvocationCount("describeLogGroups",     2);
+        mock.assertInvocationCount("describeLogStreams",    1);
+        mock.assertInvocationCount("createLogGroup",        1);
+        mock.assertInvocationCount("createLogStream",       1);
 
         testLog.assertLogEntry(0, Level.DEBUG, "creating.*log stream.*bar.*bargle");
     }
@@ -538,13 +539,15 @@ public class TestCloudWatchLogsUtil
     @Test
     public void testDeleteLogGroup() throws Exception
     {
+        // assumes CloudWatchLogsUtil.RESOURCE_TRANSITION_DESCRIBE_INTERVAL == 50
+
         MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public DescribeLogGroupsResult describeLogGroups(DescribeLogGroupsRequest request)
             {
                 // delete will have removed known group name so we must simulate it
-                if (describeLogGroupsInvocationCount++ < 2)
+                if (getInvocationCount("describeLogGroups") < 3)
                 {
                     LogGroup group = new LogGroup().withLogGroupName("foo");
                     return new DescribeLogGroupsResult().withLogGroups(group);
@@ -559,9 +562,9 @@ public class TestCloudWatchLogsUtil
         assertTrue(CloudWatchLogsUtil.deleteLogGroup(client, "foo", 200));
         long finish = System.currentTimeMillis();
 
-        assertEquals("deleteLogGroup invocation count",     1,          mock.deleteLogGroupInvocationCount);
-        assertEquals("describeLogGroups invocation count",  3,          mock.describeLogGroupsInvocationCount);
-        assertInRange("waited between describes",           50, 150,    (finish - start));
+        mock.assertInvocationCount("deleteLogGroup",        1);
+        mock.assertInvocationCount("describeLogGroups",     3);
+        assertInRange("waited between describes",           80, 120,    (finish - start));
 
         testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log group.*foo");
     }
@@ -575,8 +578,8 @@ public class TestCloudWatchLogsUtil
 
         assertTrue(CloudWatchLogsUtil.deleteLogGroup(client, "bar", 200));
 
-        assertEquals("deleteLogGroup invocation count",     1,          mock.deleteLogGroupInvocationCount);
-        assertEquals("describeLogGroups invocation count",  0,          mock.describeLogGroupsInvocationCount);
+        mock.assertInvocationCount("deleteLogGroup",        1);
+        mock.assertInvocationCount("describeLogGroups",     0);
 
         testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log group.*bar");
     }
@@ -590,7 +593,6 @@ public class TestCloudWatchLogsUtil
             @Override
             public DeleteLogGroupResult deleteLogGroup(DeleteLogGroupRequest request)
             {
-                deleteLogGroupInvocationCount++;
                 throw new OperationAbortedException("");
             }
         };
@@ -598,8 +600,8 @@ public class TestCloudWatchLogsUtil
 
         assertTrue(CloudWatchLogsUtil.deleteLogGroup(client, "bar", 200));
 
-        assertEquals("deleteLogGroup invocation count",     1,          mock.deleteLogGroupInvocationCount);
-        assertEquals("describeLogGroups invocation count",  1,          mock.describeLogGroupsInvocationCount);
+        mock.assertInvocationCount("deleteLogGroup",        1);
+        mock.assertInvocationCount("describeLogGroups",     1);
 
         testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log group.*bar");
     }
@@ -614,7 +616,6 @@ public class TestCloudWatchLogsUtil
             public DeleteLogGroupResult deleteLogGroup(DeleteLogGroupRequest request)
             {
                 // we're going to make this happen by not actually deleting the group
-                deleteLogGroupInvocationCount++;
                 return new DeleteLogGroupResult();
             }
         };
@@ -624,8 +625,8 @@ public class TestCloudWatchLogsUtil
         assertFalse(CloudWatchLogsUtil.deleteLogGroup(client, "foo", 200));
         long finish = System.currentTimeMillis();
 
-        assertEquals("deleteLogGroup invocation count",     1,          mock.deleteLogGroupInvocationCount);
-        assertEquals("describeLogGroups invocation count",  4,          mock.describeLogGroupsInvocationCount);
+        mock.assertInvocationCount("deleteLogGroup",        1);
+        mock.assertInvocationCount("describeLogGroups",     4);
         assertInRange("waited between describes",           150, 250,   (finish - start));
 
         testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log group.*foo");
@@ -642,7 +643,7 @@ public class TestCloudWatchLogsUtil
             @Override
             public DescribeLogStreamsResult describeLogStreams(DescribeLogStreamsRequest request)
             {
-                if (describeLogStreamsInvocationCount++ < 2)
+                if (getInvocationCount("describeLogStreams") < 3)
                 {
                     LogStream stream = new LogStream().withLogStreamName("foo").withLogStreamName("argle");
                     return new DescribeLogStreamsResult().withLogStreams(stream);
@@ -659,9 +660,9 @@ public class TestCloudWatchLogsUtil
         assertTrue(CloudWatchLogsUtil.deleteLogStream(client, "foo", "argle", 200));
         long finish = System.currentTimeMillis();
 
-        assertEquals("deleteLogStream invocation count",        1,          mock.deleteLogStreamInvocationCount);
-        assertEquals("describeLogStreams invocation count",     3,          mock.describeLogStreamsInvocationCount);
-        assertInRange("waited between describes",               50, 150,    (finish - start));
+        mock.assertInvocationCount("deleteLogStream",           1);
+        mock.assertInvocationCount("describeLogStreams",        3);
+        assertInRange("waited between describes",           80, 120,    (finish - start));
 
         testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log stream.*foo.*argle");
     }
@@ -675,22 +676,21 @@ public class TestCloudWatchLogsUtil
 
         assertTrue(CloudWatchLogsUtil.deleteLogStream(client, "foo", "bargle", 200));
 
-        assertEquals("deleteLogStream invocation count",        1,          mock.deleteLogStreamInvocationCount);
-        assertEquals("describeLogStreams invocation count",     0,          mock.describeLogStreamsInvocationCount);
+        mock.assertInvocationCount("deleteLogStream",           1);
+        mock.assertInvocationCount("describeLogStreams",        0);
 
         testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log stream.*foo.*bargle");
     }
 
 
     @Test
-    public void testDeleteLogStreamOperatiionAborted() throws Exception
+    public void testDeleteLogStreamOperationAborted() throws Exception
     {
         MockAWSLogsClient mock = new MockAWSLogsClient("foo", "argle")
         {
             @Override
             public DeleteLogStreamResult deleteLogStream(DeleteLogStreamRequest request)
             {
-                deleteLogStreamInvocationCount++;
                 throw new OperationAbortedException("");
             }
         };
@@ -698,8 +698,8 @@ public class TestCloudWatchLogsUtil
 
         assertTrue(CloudWatchLogsUtil.deleteLogStream(client, "foo", "bargle", 200));
 
-        assertEquals("deleteLogStream invocation count",        1,          mock.deleteLogStreamInvocationCount);
-        assertEquals("describeLogStreams invocation count",     1,          mock.describeLogStreamsInvocationCount);
+        mock.assertInvocationCount("deleteLogStream",           1);
+        mock.assertInvocationCount("describeLogStreams",        1);
 
         testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log stream.*foo.*bargle");
     }
@@ -713,7 +713,6 @@ public class TestCloudWatchLogsUtil
             @Override
             public DeleteLogStreamResult deleteLogStream(DeleteLogStreamRequest request)
             {
-                deleteLogStreamInvocationCount++;
                 return new DeleteLogStreamResult();
             }
         };
@@ -723,8 +722,8 @@ public class TestCloudWatchLogsUtil
         assertFalse(CloudWatchLogsUtil.deleteLogStream(client, "foo", "argle", 200));
         long finish = System.currentTimeMillis();
 
-        assertEquals("deleteLogStream invocation count",        1,          mock.deleteLogStreamInvocationCount);
-        assertEquals("describeLogStreams invocation count",     4,          mock.describeLogStreamsInvocationCount);
+        mock.assertInvocationCount("deleteLogStream",           1);
+        mock.assertInvocationCount("describeLogStreams",        4);
         assertInRange("waited between describes",               150, 250,   (finish - start));
 
         testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log stream.*foo.*argle");
