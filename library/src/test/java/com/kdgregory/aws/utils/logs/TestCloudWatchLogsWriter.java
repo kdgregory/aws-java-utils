@@ -35,7 +35,7 @@ import com.amazonaws.services.logs.AWSLogs;
 import com.amazonaws.services.logs.model.*;
 
 import com.kdgregory.aws.utils.testhelpers.Log4JCapturingAppender;
-import com.kdgregory.aws.utils.testhelpers.mocks.MockAWSLogsClient;
+import com.kdgregory.aws.utils.testhelpers.mocks.MockAWSLogs;
 
 
 public class TestCloudWatchLogsWriter
@@ -84,7 +84,7 @@ public class TestCloudWatchLogsWriter
     {
         long now = System.currentTimeMillis();
 
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
 
         writer = new CloudWatchLogsWriter(client, "foo", "bar");
@@ -92,18 +92,18 @@ public class TestCloudWatchLogsWriter
         writer.add(now - 1000, "appended second");
         writer.flush();
 
-        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
-        assertEquals("putLogEvents invocation count",       1,          mock.putLogEventsInvocationCount);
-        assertEquals("request included group name",         "foo",      mock.lastBatch.getLogGroupName());
-        assertEquals("request included stream name",        "bar",      mock.lastBatch.getLogStreamName());
-        assertFalse("request included sequence token",                  StringUtil.isEmpty(mock.lastBatch.getSequenceToken()));
+        mock.assertInvocationCount("describeLogStreams",    1);
+        mock.assertInvocationCount("putLogEvents",          1);
+        assertEquals("request included group name",         "foo",      mock.getLastPutRequest().getLogGroupName());
+        assertEquals("request included stream name",        "bar",      mock.getLastPutRequest().getLogStreamName());
+        assertFalse("request included sequence token",                  StringUtil.isEmpty(mock.getLastPutRequest().getSequenceToken()));
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
         assertEquals("stats: batch count",                  1,          writer.getBatchCount());
         assertEquals("stats: invalid sequence count",       0,          writer.getInvalidSequenceCount());
         assertEquals("stats: total mesage count",           2,          writer.getTotalMessagesSent());
 
-        assertMessages(mock.lastBatch.getLogEvents(), "appended second", "appended first");
+        assertMessages(mock.getLastPutEvents(), "appended second", "appended first");
 
         assertUnsentMessageQueueSize(0);
         testLog.assertLogSize(0);
@@ -115,7 +115,7 @@ public class TestCloudWatchLogsWriter
     {
         long now = System.currentTimeMillis();
 
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
 
         writer = new CloudWatchLogsWriter(client, "argle", "bargle");
@@ -123,13 +123,13 @@ public class TestCloudWatchLogsWriter
         writer.add(now - 1000, "appended second");
         writer.flush();
 
-        assertEquals("describeStreams invocation count",    2,  mock.describeLogStreamsInvocationCount);
-        assertEquals("createLogGroup invocation count",     1,  mock.createLogGroupInvocationCount);
-        assertEquals("createLogStream invocation count",    1,  mock.createLogStreamInvocationCount);
-        assertEquals("putLogEvents invocation count",       1,  mock.putLogEventsInvocationCount);
-        assertFalse("request included sequence token",      StringUtil.isEmpty(mock.lastBatch.getSequenceToken()));
+        mock.assertInvocationCount("describeLogStreams",    2);
+        mock.assertInvocationCount("createLogGroup",        1);
+        mock.assertInvocationCount("createLogStream",       1);
+        mock.assertInvocationCount("putLogEvents",          1);
+        assertFalse("request included sequence token",      StringUtil.isEmpty(mock.getLastPutRequest().getSequenceToken()));
 
-        assertMessages(mock.lastBatch.getLogEvents(), "appended second", "appended first");
+        assertMessages(mock.getLastPutEvents(), "appended second", "appended first");
 
         assertUnsentMessageQueueSize(0);
 
@@ -142,7 +142,7 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testBogusMessages() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
         writer = new CloudWatchLogsWriter(client, "argle", "bargle");
 
@@ -191,7 +191,7 @@ public class TestCloudWatchLogsWriter
     {
         long now = System.currentTimeMillis();
 
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
         writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
@@ -202,14 +202,14 @@ public class TestCloudWatchLogsWriter
         }
         writer.flush();
 
-        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
-        assertEquals("putLogEvents invocation count",       2,          mock.putLogEventsInvocationCount);
+        mock.assertInvocationCount("describeLogStreams",    1);
+        mock.assertInvocationCount("putLogEvents",          2);
         assertEquals("all messages written",                18000,      mock.allMessages.size());
         assertEquals("first message written",               "17999",    mock.allMessages.get(0).getMessage());
         assertEquals("last message written",                "0",        mock.allMessages.get(17999).getMessage());
-        assertEquals("last batch size",                     8000,       mock.lastBatch.getLogEvents().size());
-        assertEquals("last batch first message",            "7999",     mock.lastBatch.getLogEvents().get(0).getMessage());
-        assertEquals("last batch last message",             "0",        mock.lastBatch.getLogEvents().get(7999).getMessage());
+        assertEquals("last batch size",                     8000,       mock.getLastPutEvents().size());
+        assertEquals("last batch first message",            "7999",     mock.getLastPutEvents().get(0).getMessage());
+        assertEquals("last batch last message",             "0",        mock.getLastPutEvents().get(7999).getMessage());
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
         assertEquals("stats: batch count",                  2,          writer.getBatchCount());
@@ -227,7 +227,7 @@ public class TestCloudWatchLogsWriter
     {
         long now = System.currentTimeMillis();
 
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
         writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
@@ -241,14 +241,14 @@ public class TestCloudWatchLogsWriter
         }
         writer.flush();
 
-        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
-        assertEquals("putLogEvents invocation count",       2,          mock.putLogEventsInvocationCount);
+        mock.assertInvocationCount("describeLogStreams",    1);
+        mock.assertInvocationCount("putLogEvents",          2);
         assertEquals("all messages written",                2000,       mock.allMessages.size());
         assertRegex("first message written",                ".* 1999",  mock.allMessages.get(0).getMessage());
         assertRegex("last message written",                 ".* 0000",  mock.allMessages.get(1999).getMessage());
-        assertEquals("last batch size",                     976,        mock.lastBatch.getLogEvents().size());
-        assertRegex("last batch first message",             ".* 0975",  mock.lastBatch.getLogEvents().get(0).getMessage());
-        assertRegex("last batch last message",              ".* 0000",  mock.lastBatch.getLogEvents().get(975).getMessage());
+        assertEquals("last batch size",                     976,        mock.getLastPutEvents().size());
+        assertRegex("last batch first message",             ".* 0975",  mock.getLastPutEvents().get(0).getMessage());
+        assertRegex("last batch last message",              ".* 0000",  mock.getLastPutEvents().get(975).getMessage());
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
         assertEquals("stats: batch count",                  2,          writer.getBatchCount());
@@ -266,7 +266,7 @@ public class TestCloudWatchLogsWriter
     {
         long now = System.currentTimeMillis();
 
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
         writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
@@ -277,14 +277,14 @@ public class TestCloudWatchLogsWriter
         }
         writer.flush();
 
-        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
-        assertEquals("putLogEvents invocation count",       2,          mock.putLogEventsInvocationCount);
+        mock.assertInvocationCount("describeLogStreams",    1);
+        mock.assertInvocationCount("putLogEvents",          2);
         assertEquals("all messages written",                1500,       mock.allMessages.size());
         assertEquals("first message written",               "1499",     mock.allMessages.get(0).getMessage());
         assertEquals("last message written",                "0",        mock.allMessages.get(1499).getMessage());
-        assertEquals("last batch size",                     60,         mock.lastBatch.getLogEvents().size());
-        assertEquals("last batch first message",            "59",       mock.lastBatch.getLogEvents().get(0).getMessage());
-        assertEquals("last batch last message",             "0",        mock.lastBatch.getLogEvents().get(59).getMessage());
+        assertEquals("last batch size",                     60,         mock.getLastPutEvents().size());
+        assertEquals("last batch first message",            "59",       mock.getLastPutEvents().get(0).getMessage());
+        assertEquals("last batch last message",             "0",        mock.getLastPutEvents().get(59).getMessage());
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
         assertEquals("stats: batch count",                  2,          writer.getBatchCount());
@@ -300,13 +300,13 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testInvalidSequenceToken() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
         {
             @Override
             public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
             {
                 PutLogEventsResult result = super.putLogEvents(request);
-                if (putLogEventsInvocationCount < 3)
+                if (getInvocationCount("putLogEvents") < 3)
                     throw new InvalidSequenceTokenException("");
                 else
                     return result;
@@ -318,10 +318,10 @@ public class TestCloudWatchLogsWriter
         writer.add("test");
         writer.flush();
 
-        assertEquals("describeStreams invocation count",    3,          mock.describeLogStreamsInvocationCount);
-        assertEquals("putLogEvents invocation count",       3,          mock.putLogEventsInvocationCount);
-        assertEquals("message written (count)",             1,          mock.lastBatch.getLogEvents().size());
-        assertEquals("message written (content)",           "test",     mock.lastBatch.getLogEvents().get(0).getMessage());
+        mock.assertInvocationCount("describeLogStreams",    3);
+        mock.assertInvocationCount("putLogEvents",          3);
+        assertEquals("message written (count)",             1,          mock.getLastPutEvents().size());
+        assertEquals("message written (content)",           "test",     mock.getLastPutEvents().get(0).getMessage());
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
         assertEquals("stats: batch count",                  1,          writer.getBatchCount());
@@ -337,12 +337,11 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testDataAlreadyAccepted() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
         {
             @Override
             public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
             {
-                putLogEventsInvocationCount++;
                 throw new DataAlreadyAcceptedException("");
             }
         };
@@ -352,8 +351,8 @@ public class TestCloudWatchLogsWriter
         writer.add("test");
         writer.flush();
 
-        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
-        assertEquals("putLogEvents invocation count",       1,          mock.putLogEventsInvocationCount);
+        mock.assertInvocationCount("describeLogStreams",    1);
+        mock.assertInvocationCount("putLogEvents",          1);
         assertEquals("message written (count)",             0,          mock.allMessages.size());
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
@@ -370,12 +369,11 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testUncaughtExceptionInDescribe() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
         {
             @Override
             public DescribeLogStreamsResult describeLogStreams(DescribeLogStreamsRequest request)
             {
-                describeLogStreamsInvocationCount++;
                 throw new ServiceUnavailableException("");
             }
         };
@@ -385,8 +383,8 @@ public class TestCloudWatchLogsWriter
         writer.add("test");
         writer.flush();
 
-        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
-        assertEquals("putLogEvents invocation count",       0,          mock.putLogEventsInvocationCount);
+        mock.assertInvocationCount("describeLogStreams",    1);
+        mock.assertInvocationCount("putLogEvents",          0);
         assertEquals("message written (count)",             0,          mock.allMessages.size());
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
@@ -403,12 +401,11 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testUncaughtExceptionInPut() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
         {
             @Override
             public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
             {
-                putLogEventsInvocationCount++;
                 throw new ServiceUnavailableException("");
             }
         };
@@ -418,8 +415,8 @@ public class TestCloudWatchLogsWriter
         writer.add("test");
         writer.flush();
 
-        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
-        assertEquals("putLogEvents invocation count",       1,          mock.putLogEventsInvocationCount);
+        mock.assertInvocationCount("describeLogStreams",    1);
+        mock.assertInvocationCount("putLogEvents",          1);
         assertEquals("message written (count)",             0,          mock.allMessages.size());
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
@@ -436,7 +433,7 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testRejectedMessages() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
         {
             @Override
             public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
@@ -456,8 +453,8 @@ public class TestCloudWatchLogsWriter
             writer.add("test " + ii);
         writer.flush();
 
-        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
-        assertEquals("putLogEvents invocation count",       1,          mock.putLogEventsInvocationCount);
+        mock.assertInvocationCount("describeLogStreams",    1);
+        mock.assertInvocationCount("putLogEvents",          1);
         assertEquals("all messages passed to putLogEvents", 10,         mock.allMessages.size());
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
@@ -474,16 +471,16 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testShutdown() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
 
         writer = new CloudWatchLogsWriter(client, "foo", "bar");
         writer.add("test");
         writer.shutdown();
 
-        assertEquals("describeStreams invocation count",    1,          mock.describeLogStreamsInvocationCount);
-        assertEquals("putLogEvents invocation count",       1,          mock.putLogEventsInvocationCount);
-        assertEquals("last message",                        "test",     mock.lastBatch.getLogEvents().get(0).getMessage());
+        mock.assertInvocationCount("describeLogStreams",    1);
+        mock.assertInvocationCount("putLogEvents",          1);
+        assertEquals("last message",                        "test",     mock.getLastPutEvents().get(0).getMessage());
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
         assertEquals("stats: batch count",                  1,          writer.getBatchCount());
@@ -516,7 +513,7 @@ public class TestCloudWatchLogsWriter
 
         long now = System.currentTimeMillis();
 
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
         writer = new CloudWatchLogsWriter(client, "foo", "bar", threadpool, interval);
 
@@ -527,20 +524,20 @@ public class TestCloudWatchLogsWriter
         long lastFlush =  writer.getLastFlushTime();
 
         assertInRange("flush was invoked after delay",  now + 100, now + 300,               lastFlush);
-        assertEquals("putLogEvents invocation count",   1,                                  mock.putLogEventsInvocationCount);
-        assertEquals("last message",                    "test",                             mock.lastBatch.getLogEvents().get(0).getMessage());
+        mock.assertInvocationCount("putLogEvents",      1);
+        assertEquals("last message",                    "test",                             mock.getLastPutEvents().get(0).getMessage());
 
         Thread.sleep(200);
 
         assertInRange("flush was invoked again",        lastFlush + 100, lastFlush + 300,   writer.getLastFlushTime());
-        assertEquals("putLogEvents invocation count",   1,                                  mock.putLogEventsInvocationCount);
+        mock.assertInvocationCount("putLogEvents",      1);
 
         long shutdownAt = System.currentTimeMillis();
         writer.shutdown();
 
         Thread.sleep(300);  // two chances to invoke
 
-        assertInRange("flush invoked immediately after shutdown", shutdownAt, shutdownAt + 50, writer.getLastFlushTime());
+        assertInRange("flush invoked immediately after shutdown", shutdownAt, shutdownAt + 100, writer.getLastFlushTime());
     }
 
 }

@@ -29,6 +29,12 @@ import com.amazonaws.services.logs.model.*;
 public class CloudWatchLogsUtil
 {
     private static Log logger = LogFactory.getLog(CloudWatchLogsUtil.class);
+    
+    /**
+     *  The milliseconds to wait between describes when creating or deleting a resource.
+     *  This is exposed for testing.
+     */
+    public final static long RESOURCE_TRANSITION_DESCRIBE_INTERVAL = 50;
 
 
     /**
@@ -63,7 +69,7 @@ public class CloudWatchLogsUtil
             // someone else is trying to create, fall through and wait until they're done
         }
 
-        return waitUntilCreated(client, groupName, timeout, 50);
+        return waitUntilCreated(client, groupName, timeout, RESOURCE_TRANSITION_DESCRIBE_INTERVAL);
     }
 
 
@@ -105,7 +111,7 @@ public class CloudWatchLogsUtil
             // fall through so that we can retrieve group name
         }
 
-        return waitUntilCreated(client, groupName, streamName, timeout, 50);
+        return waitUntilCreated(client, groupName, streamName, timeout, RESOURCE_TRANSITION_DESCRIBE_INTERVAL);
     }
 
 
@@ -147,7 +153,7 @@ public class CloudWatchLogsUtil
 
             try
             {
-                Thread.sleep(50);
+                Thread.sleep(RESOURCE_TRANSITION_DESCRIBE_INTERVAL);
             }
             catch (InterruptedException ex)
             {
@@ -201,7 +207,7 @@ public class CloudWatchLogsUtil
 
             try
             {
-                Thread.sleep(50);
+                Thread.sleep(RESOURCE_TRANSITION_DESCRIBE_INTERVAL);
             }
             catch (InterruptedException ex)
             {

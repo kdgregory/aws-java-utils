@@ -22,7 +22,6 @@ import java.util.TreeSet;
 import java.util.UUID;
 
 import net.sf.kdgcommons.lang.StringUtil;
-import net.sf.kdgcommons.test.SelfMock;
 
 import com.amazonaws.services.logs.AWSLogs;
 import com.amazonaws.services.logs.model.*;
@@ -31,24 +30,15 @@ import com.amazonaws.services.logs.model.*;
  *  A mock client that knows about a predefined set of groups and streams and
  *  can provide messages.
  */
-public class MockAWSLogsClient
-extends SelfMock<AWSLogs>
+public class MockAWSLogs
+extends AbstractMock<AWSLogs>
 {
-    // public variables will be inspected by tests, protected variables may
-    // be changed by subclasses but are not expected to be used by tests
-
-    public int createLogGroupInvocationCount = 0;
-    public int createLogStreamInvocationCount = 0;
-    public int deleteLogGroupInvocationCount = 0;
-    public int deleteLogStreamInvocationCount = 0;
-    public int describeLogGroupsInvocationCount = 0;
-    public int describeLogStreamsInvocationCount = 0;
-    public int putLogEventsInvocationCount = 0;
-    public int getLogEventsInvocationCount = 0;
+    // public variables will be inspected by tests
+    // protected variables may be changed by subclasses but are not inspected by tests;
+    // private variables are for internal state
 
     protected String uploadSequenceToken = UUID.randomUUID().toString();
 
-    public PutLogEventsRequest lastBatch;
     public List<InputLogEvent> allMessages = new ArrayList<InputLogEvent>();
 
     private Map<String,TreeSet<String>> groupsAndStreams = new TreeMap<String,TreeSet<String>>();
@@ -60,7 +50,7 @@ extends SelfMock<AWSLogs>
      *  Basic constructor: must call one or more of the configuration methods
      *  for this to be useful.
      */
-    public MockAWSLogsClient()
+    public MockAWSLogs()
     {
         super(AWSLogs.class);
     }
@@ -69,7 +59,7 @@ extends SelfMock<AWSLogs>
     /**
      *  Convenience constructor, for a single log group and stream.
      */
-    public MockAWSLogsClient(String knownLogGroupName, String knownLogStreamName)
+    public MockAWSLogs(String knownLogGroupName, String knownLogStreamName)
     {
         this();
         addStream(knownLogGroupName, knownLogStreamName);
@@ -82,7 +72,7 @@ extends SelfMock<AWSLogs>
     /**
      *  Adds a group and its list of streams (which may be empty).
      */
-    public MockAWSLogsClient withGroupAndStreams(String groupName, String... streamNames)
+    public MockAWSLogs withGroupAndStreams(String groupName, String... streamNames)
     {
         addGroup(groupName);
         for (String streamName : streamNames)
@@ -98,7 +88,7 @@ extends SelfMock<AWSLogs>
      *  unique timestamp. There is no differentiation of messages by group or
      *  stream.
      */
-    public MockAWSLogsClient withMessage(long timestamp, String message)
+    public MockAWSLogs withMessage(long timestamp, String message)
     {
         messages.put(Long.valueOf(timestamp), message);
         return this;
@@ -109,10 +99,25 @@ extends SelfMock<AWSLogs>
     /**
      *  Sets the page size for paginated operations.
      */
-    public MockAWSLogsClient withPageSize(int value)
+    public MockAWSLogs withPageSize(int value)
     {
         this.pageSize = value;
         return this;
+    }
+
+//----------------------------------------------------------------------------
+//  Invocation accessors
+//----------------------------------------------------------------------------
+
+    public PutLogEventsRequest getLastPutRequest()
+    {
+        return getLastInvocationArgAs(0, PutLogEventsRequest.class);
+    }
+
+
+    public List<InputLogEvent> getLastPutEvents()
+    {
+        return getLastInvocationArgAs(0, PutLogEventsRequest.class).getLogEvents();
     }
 
 //----------------------------------------------------------------------------
@@ -155,7 +160,6 @@ extends SelfMock<AWSLogs>
 
     public CreateLogGroupResult createLogGroup(CreateLogGroupRequest request)
     {
-        createLogGroupInvocationCount++;
         String groupName = request.getLogGroupName();
         if (groupsAndStreams.containsKey(groupName))
             throw new ResourceAlreadyExistsException("resource already exists: " + groupName);
@@ -167,8 +171,6 @@ extends SelfMock<AWSLogs>
 
     public CreateLogStreamResult createLogStream(CreateLogStreamRequest request)
     {
-        createLogStreamInvocationCount++;
-
         String groupName = request.getLogGroupName();
         verifyGroup(groupName);
 
@@ -183,8 +185,6 @@ extends SelfMock<AWSLogs>
 
     public DeleteLogGroupResult deleteLogGroup(DeleteLogGroupRequest request)
     {
-        deleteLogGroupInvocationCount++;
-
         String groupName = request.getLogGroupName();
         verifyGroup(groupName);
 
@@ -195,8 +195,6 @@ extends SelfMock<AWSLogs>
 
     public DeleteLogStreamResult deleteLogStream(DeleteLogStreamRequest request)
     {
-        deleteLogStreamInvocationCount++;
-
         String groupName = request.getLogGroupName();
         String streamName = request.getLogStreamName();
         verifyStream(groupName, streamName);
@@ -208,8 +206,6 @@ extends SelfMock<AWSLogs>
 
     public DescribeLogGroupsResult describeLogGroups(DescribeLogGroupsRequest request)
     {
-        describeLogGroupsInvocationCount++;
-
         List<String> groupNames = new ArrayList<String>(groupsAndStreams.keySet());
 
         int startOffset = StringUtil.isEmpty(request.getNextToken())
@@ -235,8 +231,6 @@ extends SelfMock<AWSLogs>
 
     public DescribeLogStreamsResult describeLogStreams(DescribeLogStreamsRequest request)
     {
-        describeLogStreamsInvocationCount++;
-
         String groupName = request.getLogGroupName();
         verifyGroup(groupName);
 
@@ -269,11 +263,8 @@ extends SelfMock<AWSLogs>
 
     public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
     {
-        putLogEventsInvocationCount++;
-
         verifyStream(request.getLogGroupName(), request.getLogStreamName());
 
-        lastBatch = request;
         allMessages.addAll(request.getLogEvents());
 
         uploadSequenceToken = UUID.randomUUID().toString();
@@ -283,8 +274,6 @@ extends SelfMock<AWSLogs>
 
     public GetLogEventsResult getLogEvents(GetLogEventsRequest request)
     {
-        getLogEventsInvocationCount++;
-
         verifyStream(request.getLogGroupName(), request.getLogStreamName());
 
         long startTimestamp = (request.getStartTime() == null)
