@@ -30,7 +30,7 @@ import com.amazonaws.services.logs.model.*;
  *  A mock client that knows about a predefined set of groups and streams and
  *  can provide messages.
  */
-public class MockAWSLogsClient
+public class MockAWSLogs
 extends AbstractMock<AWSLogs>
 {
     // public variables will be inspected by tests
@@ -50,7 +50,7 @@ extends AbstractMock<AWSLogs>
      *  Basic constructor: must call one or more of the configuration methods
      *  for this to be useful.
      */
-    public MockAWSLogsClient()
+    public MockAWSLogs()
     {
         super(AWSLogs.class);
     }
@@ -59,7 +59,7 @@ extends AbstractMock<AWSLogs>
     /**
      *  Convenience constructor, for a single log group and stream.
      */
-    public MockAWSLogsClient(String knownLogGroupName, String knownLogStreamName)
+    public MockAWSLogs(String knownLogGroupName, String knownLogStreamName)
     {
         this();
         addStream(knownLogGroupName, knownLogStreamName);
@@ -72,7 +72,7 @@ extends AbstractMock<AWSLogs>
     /**
      *  Adds a group and its list of streams (which may be empty).
      */
-    public MockAWSLogsClient withGroupAndStreams(String groupName, String... streamNames)
+    public MockAWSLogs withGroupAndStreams(String groupName, String... streamNames)
     {
         addGroup(groupName);
         for (String streamName : streamNames)
@@ -88,7 +88,7 @@ extends AbstractMock<AWSLogs>
      *  unique timestamp. There is no differentiation of messages by group or
      *  stream.
      */
-    public MockAWSLogsClient withMessage(long timestamp, String message)
+    public MockAWSLogs withMessage(long timestamp, String message)
     {
         messages.put(Long.valueOf(timestamp), message);
         return this;
@@ -99,7 +99,7 @@ extends AbstractMock<AWSLogs>
     /**
      *  Sets the page size for paginated operations.
      */
-    public MockAWSLogsClient withPageSize(int value)
+    public MockAWSLogs withPageSize(int value)
     {
         this.pageSize = value;
         return this;

@@ -22,7 +22,7 @@ import static org.junit.Assert.*;
 import com.amazonaws.services.logs.AWSLogs;
 import com.amazonaws.services.logs.model.*;
 
-import com.kdgregory.aws.utils.testhelpers.mocks.MockAWSLogsClient;
+import com.kdgregory.aws.utils.testhelpers.mocks.MockAWSLogs;
 
 
 public class TestCloudWatchLogsReader
@@ -44,7 +44,7 @@ public class TestCloudWatchLogsReader
     @Test
     public void testBasicOperation() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
                                  .withMessage(10, "first")
                                  .withMessage(20, "second")
                                  .withMessage(30, "third");
@@ -66,7 +66,7 @@ public class TestCloudWatchLogsReader
     @Test
     public void testAlternateConstructor() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
                                  .withMessage(10, "first")
                                  .withMessage(20, "second")
                                  .withMessage(30, "third");
@@ -89,7 +89,7 @@ public class TestCloudWatchLogsReader
     @Test
     public void testPaginatedRetrieve() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
                                  .withMessage(10, "first")
                                  .withMessage(20, "second")
                                  .withMessage(30, "third")
@@ -110,7 +110,7 @@ public class TestCloudWatchLogsReader
     @Test
     public void testTimeRange() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
                                  .withMessage(10, "first")
                                  .withMessage(20, "second")
                                  .withMessage(30, "third");
@@ -141,7 +141,7 @@ public class TestCloudWatchLogsReader
     @Test
     public void testNoMessages() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
 
         CloudWatchLogsReader reader = new CloudWatchLogsReader(mock.getInstance(), "foo", "bar");
         List<OutputLogEvent> events = reader.retrieve();
@@ -154,7 +154,7 @@ public class TestCloudWatchLogsReader
     @Test
     public void testMissingLogGroup() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
 
         CloudWatchLogsReader reader = new CloudWatchLogsReader(mock.getInstance(), "zippy", "bar");
         List<OutputLogEvent> events = reader.retrieve();
@@ -167,7 +167,7 @@ public class TestCloudWatchLogsReader
     @Test
     public void testMissingLogStream() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
 
         CloudWatchLogsReader reader = new CloudWatchLogsReader(mock.getInstance(), "foo", "bargle");
         List<OutputLogEvent> events = reader.retrieve();

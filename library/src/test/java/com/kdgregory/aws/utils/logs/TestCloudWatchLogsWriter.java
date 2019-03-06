@@ -35,7 +35,7 @@ import com.amazonaws.services.logs.AWSLogs;
 import com.amazonaws.services.logs.model.*;
 
 import com.kdgregory.aws.utils.testhelpers.Log4JCapturingAppender;
-import com.kdgregory.aws.utils.testhelpers.mocks.MockAWSLogsClient;
+import com.kdgregory.aws.utils.testhelpers.mocks.MockAWSLogs;
 
 
 public class TestCloudWatchLogsWriter
@@ -84,7 +84,7 @@ public class TestCloudWatchLogsWriter
     {
         long now = System.currentTimeMillis();
 
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
 
         writer = new CloudWatchLogsWriter(client, "foo", "bar");
@@ -115,7 +115,7 @@ public class TestCloudWatchLogsWriter
     {
         long now = System.currentTimeMillis();
 
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
 
         writer = new CloudWatchLogsWriter(client, "argle", "bargle");
@@ -142,7 +142,7 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testBogusMessages() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
         writer = new CloudWatchLogsWriter(client, "argle", "bargle");
 
@@ -191,7 +191,7 @@ public class TestCloudWatchLogsWriter
     {
         long now = System.currentTimeMillis();
 
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
         writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
@@ -227,7 +227,7 @@ public class TestCloudWatchLogsWriter
     {
         long now = System.currentTimeMillis();
 
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
         writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
@@ -266,7 +266,7 @@ public class TestCloudWatchLogsWriter
     {
         long now = System.currentTimeMillis();
 
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
         writer = new CloudWatchLogsWriter(client, "foo", "bar");
 
@@ -300,7 +300,7 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testInvalidSequenceToken() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
         {
             @Override
             public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
@@ -337,7 +337,7 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testDataAlreadyAccepted() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
         {
             @Override
             public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
@@ -369,7 +369,7 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testUncaughtExceptionInDescribe() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
         {
             @Override
             public DescribeLogStreamsResult describeLogStreams(DescribeLogStreamsRequest request)
@@ -401,7 +401,7 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testUncaughtExceptionInPut() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
         {
             @Override
             public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
@@ -433,7 +433,7 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testRejectedMessages() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar")
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
         {
             @Override
             public PutLogEventsResult putLogEvents(PutLogEventsRequest request)
@@ -471,7 +471,7 @@ public class TestCloudWatchLogsWriter
     @Test
     public void testShutdown() throws Exception
     {
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
 
         writer = new CloudWatchLogsWriter(client, "foo", "bar");
@@ -513,7 +513,7 @@ public class TestCloudWatchLogsWriter
 
         long now = System.currentTimeMillis();
 
-        MockAWSLogsClient mock = new MockAWSLogsClient("foo", "bar");
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
         AWSLogs client = mock.getInstance();
         writer = new CloudWatchLogsWriter(client, "foo", "bar", threadpool, interval);
 
