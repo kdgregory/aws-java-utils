@@ -399,7 +399,7 @@ public class TestMetricReporter
         reporter.add("foo", 123);
 
         // sleep for at least 3 invocations
-        Thread.sleep(interval * 3 + 10);
+        Thread.sleep(interval * 3 + 20);
 
         mock.assertInvocationCount("putMetricData", 1);
 
@@ -412,9 +412,9 @@ public class TestMetricReporter
         for (String message : messageCounters.keySet())
         {
             if (message.contains("flush called with empty queue"))
-                assertTrue("empty flush called more than once", messageCounters.get(message).intValue() > 2);
+                assertTrue("empty flush should be called multiple times", messageCounters.get(message).intValue() > 1);
             if (message.contains("failed to publish"))
-                assertEquals("flush called only once with exception", 1, messageCounters.get(message).intValue());
+                assertEquals("exception should only be reported once", 1, messageCounters.get(message).intValue());
         }
 
         executor.shutdown();

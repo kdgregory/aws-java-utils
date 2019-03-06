@@ -236,7 +236,7 @@ public class MetricReporter
      *  needed. Will log a warning and leave messages in the queu if unable
      *  to send.
      */
-    public void flush()
+    public synchronized void flush()
     {
         if (queuedMetrics.isEmpty())
         {
