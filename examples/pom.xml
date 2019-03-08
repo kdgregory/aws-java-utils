@@ -42,7 +42,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
         <aws-sdk.version>1.11.292</aws-sdk.version>
-        <kdgcommons.version>1.0.15</kdgcommons.version>
+        <kdgcommons.version>1.0.17-SNAPSHOT</kdgcommons.version>
 
         <plugin.compiler.version>3.1</plugin.compiler.version>
     </properties>

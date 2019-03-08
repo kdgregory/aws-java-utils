@@ -344,7 +344,7 @@ public class TestMetricReporter
         Thread.sleep(interval * 2 + 10);
 
         mock.assertInvocationCount("after first sleep", "putMetricData", 1);
-        mock.assertLastInvocationNotOnCurrentThread();
+        mock.assertLastInvocationNotOnCurrentThread("putMetricData");
 
         PutMetricDataRequest lastRequest = mock.getLastPutRequest();
 

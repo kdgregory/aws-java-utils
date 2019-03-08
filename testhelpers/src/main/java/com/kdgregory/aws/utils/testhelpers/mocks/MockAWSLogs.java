@@ -111,13 +111,13 @@ extends AbstractMock<AWSLogs>
 
     public PutLogEventsRequest getLastPutRequest()
     {
-        return getLastInvocationArgAs(0, PutLogEventsRequest.class);
+        return getMostRecentInvocationArg("putLogEvents", 0, PutLogEventsRequest.class);
     }
 
 
     public List<InputLogEvent> getLastPutEvents()
     {
-        return getLastInvocationArgAs(0, PutLogEventsRequest.class).getLogEvents();
+        return getLastPutRequest().getLogEvents();
     }
 
 //----------------------------------------------------------------------------

@@ -46,7 +46,7 @@ extends AbstractMock<AmazonCloudWatch>
 
     public PutMetricDataRequest getLastPutRequest()
     {
-        return getLastInvocationArgAs(0, PutMetricDataRequest.class);
+        return getMostRecentInvocationArg("putMetricData", 0, PutMetricDataRequest.class);
     }
 
 
@@ -58,6 +58,6 @@ extends AbstractMock<AmazonCloudWatch>
 
     public List<MetricDatum> getDataFromSavedPut(int index)
     {
-         return getInvocationArgAs("putMetricData", index, 0, PutMetricDataRequest.class).getMetricData();
+         return getInvocationArg("putMetricData", index, 0, PutMetricDataRequest.class).getMetricData();
     }
 }
