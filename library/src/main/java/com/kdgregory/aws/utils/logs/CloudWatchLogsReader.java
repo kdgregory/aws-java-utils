@@ -277,7 +277,8 @@ public class CloudWatchLogsReader
 
         GetLogEventsRequest request = new GetLogEventsRequest()
                                       .withLogGroupName(streamIdentifier.groupName)
-                                      .withLogStreamName(streamIdentifier.streamName);
+                                      .withLogStreamName(streamIdentifier.streamName)
+                                      .withStartFromHead(Boolean.TRUE);
         if (startTime != null)
             request.setStartTime(startTime);
 
