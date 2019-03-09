@@ -20,6 +20,9 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
 import com.amazonaws.services.logs.AWSLogs;
 import com.amazonaws.services.logs.model.*;
 
@@ -30,11 +33,17 @@ import com.amazonaws.services.logs.model.*;
  */
 public class CloudWatchLogsReader
 {
+    private Log logger = LogFactory.getLog(getClass());
+
     private AWSLogs client;
     private List<StreamIdentifier> streamIdentifiers = new ArrayList<StreamIdentifier>();
 
     private Long startTime;
     private Long endTime;
+
+    private boolean logMissingStream;
+    private boolean logRetrieveEntry;
+    private boolean logRetrieveExit;
 
 
     /**
@@ -102,6 +111,43 @@ public class CloudWatchLogsReader
     {
         this.startTime = start;
         this.endTime = finish;
+        return this;
+    }
+
+
+    /**
+     *  Controls whether {@link #retrieve} logs a warning message if the stream
+     *  is missing. Default is false, allowing speculative reads without spurious
+     *  log messages.
+     */
+    public CloudWatchLogsReader withMissingStreamLogging(boolean value)
+    {
+        logMissingStream = value;
+        return this;
+    }
+
+
+    /**
+     *  Controls whether {@link #retrieve} logs a debug message indicating that
+     *  it's about to read a stream. Default is false; in general there's no
+     *  reason that you would enable unless you want to verify that you are,
+     *  in fact, invoking the reader.
+     */
+    public CloudWatchLogsReader withRetrieveEntryLogging(boolean value)
+    {
+        logRetrieveEntry = value;
+        return this;
+    }
+
+
+    /**
+     *  Controls whether {@link #retrieve} logs a debug message indicating that
+     *  it's finished reading a stream, with the number of messages read. Default
+     *  is false.
+     */
+    public CloudWatchLogsReader withRetrieveExitLogging(boolean value)
+    {
+        logRetrieveExit = value;
         return this;
     }
 
@@ -181,7 +227,7 @@ public class CloudWatchLogsReader
 
         for (StreamIdentifier streamIdentifier : streamIdentifiers)
         {
-            readFromStream(streamIdentifier, result);
+            result.addAll(readFromStream(streamIdentifier));
         }
 
         Collections.sort(result, new OutputLogEventComparator());
@@ -221,11 +267,14 @@ public class CloudWatchLogsReader
 //----------------------------------------------------------------------------
 
     /**
-     *  Reads messages from a single stream, storing messages in the provided
-     *  list.
+     *  Reads messages from a single stream. Returns an empty list if the stream
+     *  does not exist.
      */
-    private void readFromStream(StreamIdentifier streamIdentifier, List<OutputLogEvent> output)
+    private List<OutputLogEvent> readFromStream(StreamIdentifier streamIdentifier)
     {
+        if (logRetrieveEntry && logger.isDebugEnabled())
+            logger.debug("starting retrieve from " + streamIdentifier.groupName + " / " + streamIdentifier.streamName);
+
         GetLogEventsRequest request = new GetLogEventsRequest()
                                       .withLogGroupName(streamIdentifier.groupName)
                                       .withLogStreamName(streamIdentifier.streamName);
@@ -235,6 +284,7 @@ public class CloudWatchLogsReader
         if (endTime != null)
             request.setEndTime(endTime);
 
+        List<OutputLogEvent> result = new ArrayList<OutputLogEvent>();
         String prevToken = "";
         String nextToken = "";
         do
@@ -242,17 +292,25 @@ public class CloudWatchLogsReader
             try
             {
                 GetLogEventsResult response = client.getLogEvents(request);
-                output.addAll(response.getEvents());
+                result.addAll(response.getEvents());
                 prevToken = nextToken;
                 nextToken = response.getNextForwardToken();
                 request.setNextToken(nextToken);
             }
             catch (ResourceNotFoundException ex)
             {
-                return;
+                if (logMissingStream && logger.isWarnEnabled())
+                    logger.warn("attempted retrieve from nonexistent stream: " + streamIdentifier.groupName + " / " + streamIdentifier.streamName);
+                return result;
             }
         }
         while (! prevToken.equals(nextToken));
+
+        if (logRetrieveExit && logger.isDebugEnabled())
+            logger.debug("finished retrieve from " + streamIdentifier.groupName + " / " + streamIdentifier.streamName
+                         + ": " + result.size() + " messages");
+
+        return result;
     }
 
 
