@@ -3,14 +3,15 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.kdgregory.aws</groupId>
-    <artifactId>aws-java-utils</artifactId>
+    <artifactId>aws-java-utils-testhelpers</artifactId>
     <version>1.11.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
-    <name>AWS Java Utils</name>
+    <name>AWS Java Utils - Test Helpers</name>
 
     <description>
-        Utility classes that provide a simpler interaction model on top of the AWS Java SDK.
+        A collection of classes used to support testing the main utility
+        library. May be useful for other people.
     </description>
 
     <url> https://github.com/kdgregory/aws-java-utils </url>
@@ -54,7 +55,6 @@
 
 
     <dependencies>
-        
         <dependency>
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-java-sdk-cloudwatch</artifactId>
@@ -63,54 +63,27 @@
         </dependency>        
         <dependency>
             <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-kinesis</artifactId>
-            <version>${aws-sdk.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.amazonaws</groupId>
             <artifactId>aws-java-sdk-logs</artifactId>
             <version>${aws-sdk.version}</version>
             <scope>provided</scope>
         </dependency>        
-
-        <dependency>
-            <!-- provided as a transitive dependency of the SDK or overridden by user -->
-            <groupId>commons-logging</groupId>
-            <artifactId>commons-logging</artifactId>
-            <version>${commons-logging.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>com.kdgregory.aws</groupId>
-            <artifactId>aws-java-utils-testhelpers</artifactId>
-            <version>1.11.0-SNAPSHOT</version>
-            <scope>test</scope>
-        </dependency>
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <version>${junit.version}</version>
-            <scope>test</scope>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>log4j</groupId>
             <artifactId>log4j</artifactId>
             <version>${log4j.version}</version>
-            <scope>test</scope>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>net.sf.kdgcommons</groupId>
             <artifactId>kdgcommons</artifactId>
             <version>${kdgcommons.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>net.sf.practicalxml</groupId>
-            <artifactId>practicalxml</artifactId>
-            <version>${practicalxml.version}</version>
-            <scope>test</scope>
+            <scope>provided</scope>
         </dependency>
     </dependencies>
 
@@ -129,32 +102,6 @@
             </plugin>
         </plugins>
     </build>
-
-
-    <reporting>
-        <plugins>
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>cobertura-maven-plugin</artifactId>
-                <configuration>
-                    <instrumentation>
-                        <excludes>
-                            <exclude>**/Test*.class</exclude>
-                            <exclude>**/Abstract*.class</exclude>
-                            <exclude>**/testhelpers/**/*.class</exclude>
-                        </excludes>
-                    </instrumentation>
-                    <executions>
-                        <execution>
-                            <goals>
-                                <goal>clean</goal>
-                            </goals>
-                        </execution>
-                    </executions>
-                </configuration>
-            </plugin>
-        </plugins>
-    </reporting>
 
 
     <!-- local distribution management so I can review before deploying to Sonatype OSSHR -->
