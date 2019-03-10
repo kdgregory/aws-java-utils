@@ -119,40 +119,49 @@ public class TestCloudWatchLogs
     @Test
     public void testWriterAndReader() throws Exception
     {
-        MDC.put("testName", "testWriterAndReader");
-        logger.info("starting");
-
         String logGroupName = "TestLogsUtil-testWriterAndReader-" + UUID.randomUUID();
         String logStreamName = "stream-1";
 
-        int numRecords = 1000;
+        int numRecords = 20000;
         int lastIndex = numRecords - 1;
+
+        MDC.put("testName", "testWriterAndReader");
+        logger.info("starting, log group is {}", logGroupName);
 
         long now = System.currentTimeMillis();
 
-        CloudWatchLogsWriter writer = new CloudWatchLogsWriter(client, logGroupName, logStreamName);
+        CloudWatchLogsWriter writer = new CloudWatchLogsWriter(client, logGroupName, logStreamName)
+                                      .withBatchLogging(true);
 
         for (int ii = 0 ; ii < numRecords ; ii++)
         {
-            writer.add(now - 100 * ii, String.format("message %04d", ii));
+            writer.add(now - 100 * ii, String.format("message %06d", ii));
         }
         writer.flush();
 
+        assertTrue("write processed in multiple batches", writer.getBatchCount() > 1);
 
-        CloudWatchLogsReader reader = new CloudWatchLogsReader(client, logGroupName, logStreamName);
+
+        CloudWatchLogsReader reader = new CloudWatchLogsReader(client, logGroupName, logStreamName)
+                                      .withRetrieveEntryLogging(true)
+                                      .withRetrieveExitLogging(true);
+
+        logger.info("retrieving events without time limit");
         List<OutputLogEvent> events1 = reader.retrieve(numRecords, 10000);
 
         assertEquals("retrieved all records",   numRecords,                     events1.size());
 
         assertEquals("first record timestamp",   now - 100 * lastIndex,         events1.get(0).getTimestamp().longValue());
         assertEquals("last record timestamp",    now,                           events1.get(lastIndex).getTimestamp().longValue());
-        assertEquals("first record message",    "message 0999",                 events1.get(0).getMessage());
-        assertEquals("last record's message",   "message 0000",                 events1.get(lastIndex).getMessage());
+        assertEquals("first record message",    "message 019999",               events1.get(0).getMessage());
+        assertEquals("last record's message",   "message 000000",               events1.get(lastIndex).getMessage());
 
         // note: time range is inclusive start, exclusive end
         long timeStart = now - 100 * 50;
         long timeEnd   = now - 100 * 20;
         reader.withTimeRange(timeStart, timeEnd);
+
+        logger.info("retrieving events with time limit ({} to {})", timeStart, timeEnd);
         List<OutputLogEvent> events2 = reader.retrieve();
 
         assertEquals("number of records in range",  30,                                         events2.size());
@@ -166,15 +175,15 @@ public class TestCloudWatchLogs
     @Test
     public void testWriterMultiThread() throws Exception
     {
-        MDC.put("testName", "testWriterMultiThread");
-        logger.info("starting");
-
         final String logGroupName = "TestLogsUtil-testWriterMultiThread" + UUID.randomUUID();
         final String logStreamName = "stream-1";
 
         final int numThreads = 10;
         final int recordsPerThread = 1000;
         final int flushInterval = 200;
+
+        MDC.put("testName", "testWriterMultiThread");
+        logger.info("starting, log group is {}", logGroupName);
 
         List<Thread> threads = new ArrayList<Thread>();
         for (int ii = 0 ; ii < numThreads ; ii++)
@@ -222,9 +231,6 @@ public class TestCloudWatchLogs
     @Test
     public void testReaderMultiStream() throws Exception
     {
-        MDC.put("testName", "testReaderMultiStream");
-        logger.info("testReaderMultiStream");
-
         String logGroupName = "TestLogsUtil-testReaderMultiStream-" + UUID.randomUUID();
         String logStreamName1 = "stream-1";
         String logStreamName2 = "stream-2";
@@ -232,6 +238,9 @@ public class TestCloudWatchLogs
         int numRecords = 1000;
 
         long now = System.currentTimeMillis();
+
+        MDC.put("testName", "testReaderMultiStream");
+        logger.info("starting, log group is {}", logGroupName);
 
         CloudWatchLogsWriter writer1 = new CloudWatchLogsWriter(client, logGroupName, logStreamName1);
         CloudWatchLogsWriter writer2 = new CloudWatchLogsWriter(client, logGroupName, logStreamName2);
@@ -262,8 +271,6 @@ public class TestCloudWatchLogs
     @Test
     public void testReaderMultiGroup() throws Exception
     {
-        MDC.put("testName", "testReaderMultiGroup");
-        logger.info("testReaderMultiStream");
 
         String logGroupNameBase = "TestLogsUtil-testReaderMultiGroup-" + UUID.randomUUID();
         String logGroupName1 = logGroupNameBase + "-1";
@@ -273,6 +280,9 @@ public class TestCloudWatchLogs
         int numRecords = 1000;
 
         long now = System.currentTimeMillis();
+
+        MDC.put("testName", "testReaderMultiGroup");
+        logger.info("starting, log group base is {}", logGroupNameBase);
 
         CloudWatchLogsWriter writer1 = new CloudWatchLogsWriter(client, logGroupName1, logStreamName);
         CloudWatchLogsWriter writer2 = new CloudWatchLogsWriter(client, logGroupName2, logStreamName);

@@ -41,7 +41,7 @@ import com.amazonaws.services.logs.model.*;
  *  The writer maintains a set of monitoring variables, such as the number of calls
  *  to {@link #flush}, which can be examined by the application. It writes debug
  *  logging messages for significant events (such as creating a log stream), and
- *  warning messages for unexpected exceptions.
+ *  warning messages for unexpected exceptions or rejected messages.
  */
 public class CloudWatchLogsWriter
 {
@@ -52,6 +52,8 @@ public class CloudWatchLogsWriter
     private String logStreamName;
     private ScheduledExecutorService executor;
     private long interval;
+
+    private boolean logBatches;
 
     private LinkedBlockingDeque<QueuedMessage> unsentMessages = new LinkedBlockingDeque<QueuedMessage>();
     private volatile boolean isShutdown = false;
@@ -109,6 +111,20 @@ public class CloudWatchLogsWriter
         this.interval = interval;
 
         executor.schedule(new BackgroundTask(), interval, TimeUnit.MILLISECONDS);
+    }
+
+
+//----------------------------------------------------------------------------
+//  Post-construction API
+//----------------------------------------------------------------------------
+
+    /**
+     *  Enables debug-level logging when a batch is written.
+     */
+    public CloudWatchLogsWriter withBatchLogging(boolean value)
+    {
+        logBatches = value;
+        return this;
     }
 
 //----------------------------------------------------------------------------
@@ -397,6 +413,11 @@ public class CloudWatchLogsWriter
      */
     private String attemptToSend(List<QueuedMessage> batch, String uploadSequenceToken)
     {
+        if (logBatches && logger.isDebugEnabled())
+        {
+            logger.debug("sending batch of " + batch.size() + " events to " + logGroupName + " / " + logStreamName);
+        }
+
         List<InputLogEvent> events = new ArrayList<InputLogEvent>(batch.size());
         for (QueuedMessage message : batch)
         {
@@ -423,6 +444,9 @@ public class CloudWatchLogsWriter
                         ? batch.size() - rejectInfo.getTooNewLogEventStartIndex().intValue()
                         : 0;
             messagesRejected = Math.max(expired, tooOld) + tooNew;
+            logger.warn("rejected " + messagesRejected
+                        + " messages on stream " + logGroupName + " / " + logStreamName + ": "
+                        + Math.max(expired, tooOld) + " expired/too old, " + tooNew + " too new");
         }
         batchCount.incrementAndGet();
         totalMessagesSent.addAndGet(batch.size());
