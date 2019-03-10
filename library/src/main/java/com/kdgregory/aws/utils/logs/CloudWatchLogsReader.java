@@ -314,7 +314,7 @@ public class CloudWatchLogsReader
         while (! prevToken.equals(nextToken));
 
         if (logRetrieveExit && logger.isDebugEnabled())
-            logger.debug("retrieved " + result.size() +  " messages from " + streamIdentifier);
+            logger.debug("retrieved " + result.size() +  " events from " + streamIdentifier);
 
         return result;
     }

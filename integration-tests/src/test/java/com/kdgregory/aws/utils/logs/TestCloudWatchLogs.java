@@ -143,6 +143,7 @@ public class TestCloudWatchLogs
 
 
         CloudWatchLogsReader reader = new CloudWatchLogsReader(client, logGroupName, logStreamName)
+                                      .withRetrieveEntryLogging(true)
                                       .withRetrieveExitLogging(true);
 
         logger.info("retrieving events without time limit");
