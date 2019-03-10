@@ -304,4 +304,10 @@ extends AbstractMock<AWSLogs>
                .withEvents(events.subList(startOffset, endOffset))
                .withNextForwardToken(String.valueOf(endOffset));
     }
+
+
+    public void shutdown()
+    {
+        // nothing happening here
+    }
 }
