@@ -183,6 +183,12 @@ public class CloudWatchLogsReader
             return streamName;
         }
 
+        @Override
+        public String toString()
+        {
+            return groupName + " / " + streamName;
+        }
+
         // the following are used by the constructors
 
         public static StreamIdentifier[] fromStreamNames(String logGroupName, String... logStreamNames)
@@ -273,7 +279,7 @@ public class CloudWatchLogsReader
     private List<OutputLogEvent> readFromStream(StreamIdentifier streamIdentifier)
     {
         if (logRetrieveEntry && logger.isDebugEnabled())
-            logger.debug("starting retrieve from " + streamIdentifier.groupName + " / " + streamIdentifier.streamName);
+            logger.debug("retrieving from " + streamIdentifier);
 
         GetLogEventsRequest request = new GetLogEventsRequest()
                                       .withLogGroupName(streamIdentifier.groupName)
@@ -301,22 +307,22 @@ public class CloudWatchLogsReader
             catch (ResourceNotFoundException ex)
             {
                 if (logMissingStream && logger.isWarnEnabled())
-                    logger.warn("attempted retrieve from nonexistent stream: " + streamIdentifier.groupName + " / " + streamIdentifier.streamName);
+                    logger.warn("retrieve from nonexistent stream: " + streamIdentifier);
                 return result;
             }
         }
         while (! prevToken.equals(nextToken));
 
         if (logRetrieveExit && logger.isDebugEnabled())
-            logger.debug("finished retrieve from " + streamIdentifier.groupName + " / " + streamIdentifier.streamName
-                         + ": " + result.size() + " messages");
+            logger.debug("retrieved " + result.size() +  " messages from " + streamIdentifier);
 
         return result;
     }
 
 
     /**
-     *  A comparator to sort log events by timestmap.
+     *  A comparator to sort log events by timestamp, used to combine events from
+     *  multiple streams.
      */
     private static class OutputLogEventComparator
     implements Comparator<OutputLogEvent>
