@@ -464,7 +464,8 @@ public class TestCloudWatchLogsWriter
 
         assertUnsentMessageQueueSize(0);
 
-        logCapture.assertLogSize(0);
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.WARN, "rejected 8 messages.*foo.*bar.*: 5 expired/too old, 3 too new");
     }
 
 

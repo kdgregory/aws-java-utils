@@ -41,7 +41,7 @@ import com.amazonaws.services.logs.model.*;
  *  The writer maintains a set of monitoring variables, such as the number of calls
  *  to {@link #flush}, which can be examined by the application. It writes debug
  *  logging messages for significant events (such as creating a log stream), and
- *  warning messages for unexpected exceptions.
+ *  warning messages for unexpected exceptions or rejected messages.
  */
 public class CloudWatchLogsWriter
 {
@@ -444,6 +444,9 @@ public class CloudWatchLogsWriter
                         ? batch.size() - rejectInfo.getTooNewLogEventStartIndex().intValue()
                         : 0;
             messagesRejected = Math.max(expired, tooOld) + tooNew;
+            logger.warn("rejected " + messagesRejected
+                        + " messages on stream " + logGroupName + " / " + logStreamName + ": "
+                        + Math.max(expired, tooOld) + " expired/too old, " + tooNew + " too new");
         }
         batchCount.incrementAndGet();
         totalMessagesSent.addAndGet(batch.size());
