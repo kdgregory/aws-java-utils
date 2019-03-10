@@ -37,7 +37,7 @@ import com.amazonaws.services.logs.model.*;
 /**
  *  Combined test for all CloudWatch Logs functionality.
  */
-public class TestCloudWatchLogs
+public class CloudWatchLogsIntegrationTest
 {
     // a single instance of the client is shared between all tests
     private static AWSLogs client;
@@ -93,7 +93,7 @@ public class TestCloudWatchLogs
         MDC.put("testName", "testCreationAndDeletion");
         logger.info("starting");
 
-        String logGroupName = "TestLogsUtil-testCreationAndDeletion-" + UUID.randomUUID();
+        String logGroupName = "CloudWatchLogsIntegrationTest-testCreationAndDeletion-" + UUID.randomUUID();
         String logStreamName = "stream-1";
 
         // this will also exercise createLogGroup()
@@ -119,7 +119,7 @@ public class TestCloudWatchLogs
     @Test
     public void testWriterAndReader() throws Exception
     {
-        String logGroupName = "TestLogsUtil-testWriterAndReader-" + UUID.randomUUID();
+        String logGroupName = "CloudWatchLogsIntegrationTest-testWriterAndReader-" + UUID.randomUUID();
         String logStreamName = "stream-1";
 
         int numRecords = 20000;
@@ -175,7 +175,7 @@ public class TestCloudWatchLogs
     @Test
     public void testWriterMultiThread() throws Exception
     {
-        final String logGroupName = "TestLogsUtil-testWriterMultiThread" + UUID.randomUUID();
+        final String logGroupName = "CloudWatchLogsIntegrationTest-testWriterMultiThread" + UUID.randomUUID();
         final String logStreamName = "stream-1";
 
         final int numThreads = 10;
@@ -231,7 +231,7 @@ public class TestCloudWatchLogs
     @Test
     public void testReaderMultiStream() throws Exception
     {
-        String logGroupName = "TestLogsUtil-testReaderMultiStream-" + UUID.randomUUID();
+        String logGroupName = "CloudWatchLogsIntegrationTest-testReaderMultiStream-" + UUID.randomUUID();
         String logStreamName1 = "stream-1";
         String logStreamName2 = "stream-2";
 
@@ -272,7 +272,7 @@ public class TestCloudWatchLogs
     public void testReaderMultiGroup() throws Exception
     {
 
-        String logGroupNameBase = "TestLogsUtil-testReaderMultiGroup-" + UUID.randomUUID();
+        String logGroupNameBase = "CloudWatchLogsIntegrationTest-testReaderMultiGroup-" + UUID.randomUUID();
         String logGroupName1 = logGroupNameBase + "-1";
         String logGroupName2 = logGroupNameBase + "-2";
         String logStreamName = "stream-1";
