@@ -279,7 +279,7 @@ public class CloudWatchLogsReader
     private List<OutputLogEvent> readFromStream(StreamIdentifier streamIdentifier)
     {
         if (logRetrieveEntry && logger.isDebugEnabled())
-            logger.debug("retrieving from " + streamIdentifier);
+            logger.debug("starting retrieve from " + streamIdentifier);
 
         GetLogEventsRequest request = new GetLogEventsRequest()
                                       .withLogGroupName(streamIdentifier.groupName)
@@ -307,7 +307,7 @@ public class CloudWatchLogsReader
             catch (ResourceNotFoundException ex)
             {
                 if (logMissingStream && logger.isWarnEnabled())
-                    logger.warn("retrieve from nonexistent stream: " + streamIdentifier);
+                    logger.warn("retrieve from missing stream: " + streamIdentifier);
                 return result;
             }
         }

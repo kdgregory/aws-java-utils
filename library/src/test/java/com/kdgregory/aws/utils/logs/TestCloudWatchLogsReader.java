@@ -16,17 +16,23 @@ package com.kdgregory.aws.utils.logs;
 
 import java.util.List;
 
+import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
+
+import org.apache.log4j.Level;
 
 import com.amazonaws.services.logs.AWSLogs;
 import com.amazonaws.services.logs.model.*;
 
+import com.kdgregory.aws.utils.testhelpers.Log4JCapturingAppender;
 import com.kdgregory.aws.utils.testhelpers.mocks.MockAWSLogs;
 
 
 public class TestCloudWatchLogsReader
 {
+    private Log4JCapturingAppender logCapture;
+
 //----------------------------------------------------------------------------
 //  Helpers
 //----------------------------------------------------------------------------
@@ -35,6 +41,17 @@ public class TestCloudWatchLogsReader
     {
         assertEquals("event " + index + ", timestamp",  expectedTimestamp,  events.get(index).getTimestamp().longValue());
         assertEquals("event " + index + ", message",    expectedMessage,    events.get(index).getMessage());
+    }
+
+//----------------------------------------------------------------------------
+//  Per-test boilerplate
+//----------------------------------------------------------------------------
+
+    @Before
+    public void setUp()
+    {
+        logCapture = Log4JCapturingAppender.getInstance();
+        logCapture.reset();
     }
 
 //----------------------------------------------------------------------------
@@ -60,6 +77,9 @@ public class TestCloudWatchLogsReader
         assertEvent(events, 0, 10, "first");
         assertEvent(events, 1, 20, "second");
         assertEvent(events, 2, 30, "third");
+
+        // by default logging is not enabled
+        logCapture.assertLogSize(0);
     }
 
 
@@ -161,6 +181,10 @@ public class TestCloudWatchLogsReader
 
         mock.assertInvocationCount("getLogEvents",  1);
         assertEquals("number of events",            0,  events.size());
+        assertEquals("number of events",            0,  events.size());
+
+        // we have to explicitly enable logging of a missing group/stream
+        logCapture.assertLogSize(0);
     }
 
 
@@ -174,5 +198,50 @@ public class TestCloudWatchLogsReader
 
         mock.assertInvocationCount("getLogEvents",  1);
         assertEquals("number of events",            0,  events.size());
+
+        // we have to explicitly enable logging of a missing group/stream
+        logCapture.assertLogSize(0);
+    }
+
+
+    @Test
+    public void testMissingLogStreamLogging() throws Exception
+    {
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
+
+        CloudWatchLogsReader reader = new CloudWatchLogsReader(mock.getInstance(), "foo", "bargle")
+                                      .withMissingStreamLogging(true);
+
+        List<OutputLogEvent> events = reader.retrieve();
+
+        mock.assertInvocationCount("getLogEvents",  1);
+        assertEquals("number of events",            0,  events.size());
+        assertEquals("number of events",            0,  events.size());
+
+        // we have to explicitly enable logging of a missing group/stream
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.WARN, "retrieve from missing stream.*foo.*bargle");
+    }
+
+
+    @Test
+    public void testBatchLogging() throws Exception
+    {
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar")
+                                 .withMessage(10, "first")
+                                 .withMessage(20, "second");
+
+        CloudWatchLogsReader reader = new CloudWatchLogsReader(mock.getInstance(), "foo", "bar")
+                                      .withRetrieveEntryLogging(true)
+                                      .withRetrieveExitLogging(true);
+
+        List<OutputLogEvent> events = reader.retrieve();
+
+        mock.assertInvocationCount("getLogEvents",  2);
+        assertEquals("number of events",            2,  events.size());
+
+        logCapture.assertLogSize(2);
+        logCapture.assertLogEntry(0, Level.DEBUG, "starting retrieve.*foo.*bar");
+        logCapture.assertLogEntry(1, Level.DEBUG, "retrieved 2 events from.*foo.*bar");
     }
 }
