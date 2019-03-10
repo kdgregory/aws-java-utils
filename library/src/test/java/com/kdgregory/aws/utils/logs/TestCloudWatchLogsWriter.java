@@ -40,7 +40,7 @@ import com.kdgregory.aws.utils.testhelpers.mocks.MockAWSLogs;
 
 public class TestCloudWatchLogsWriter
 {
-    private Log4JCapturingAppender testLog;
+    private Log4JCapturingAppender logCapture;
 
     // created per-test
     private CloudWatchLogsWriter writer;
@@ -71,8 +71,8 @@ public class TestCloudWatchLogsWriter
     @Before
     public void setUp()
     {
-        testLog = Log4JCapturingAppender.getInstance();
-        testLog.reset();
+        logCapture = Log4JCapturingAppender.getInstance();
+        logCapture.reset();
     }
 
 //----------------------------------------------------------------------------
@@ -106,7 +106,7 @@ public class TestCloudWatchLogsWriter
         assertMessages(mock.getLastPutEvents(), "appended second", "appended first");
 
         assertUnsentMessageQueueSize(0);
-        testLog.assertLogSize(0);
+        logCapture.assertLogSize(0);
     }
 
 
@@ -133,9 +133,9 @@ public class TestCloudWatchLogsWriter
 
         assertUnsentMessageQueueSize(0);
 
-        testLog.assertLogEntry(0, Level.DEBUG, "stream.*argle.*bargle.*does not exist.*");
-        testLog.assertLogEntry(1, Level.DEBUG, "creating .* log stream.*bargle.*");
-        testLog.assertLogEntry(2, Level.DEBUG, "creating .* log group.*argle.*");
+        logCapture.assertLogEntry(0, Level.DEBUG, "stream.*argle.*bargle.*does not exist.*");
+        logCapture.assertLogEntry(1, Level.DEBUG, "creating .* log stream.*bargle.*");
+        logCapture.assertLogEntry(2, Level.DEBUG, "creating .* log group.*argle.*");
     }
 
 
@@ -218,7 +218,7 @@ public class TestCloudWatchLogsWriter
 
         assertUnsentMessageQueueSize(0);
 
-        testLog.assertLogSize(0);
+        logCapture.assertLogSize(0);
     }
 
 
@@ -257,7 +257,7 @@ public class TestCloudWatchLogsWriter
 
         assertUnsentMessageQueueSize(0);
 
-        testLog.assertLogSize(0);
+        logCapture.assertLogSize(0);
     }
 
 
@@ -293,7 +293,7 @@ public class TestCloudWatchLogsWriter
 
         assertUnsentMessageQueueSize(0);
 
-        testLog.assertLogSize(0);
+        logCapture.assertLogSize(0);
     }
 
 
@@ -330,7 +330,7 @@ public class TestCloudWatchLogsWriter
 
         assertUnsentMessageQueueSize(0);
 
-        testLog.assertLogSize(0);
+        logCapture.assertLogSize(0);
     }
 
 
@@ -361,8 +361,8 @@ public class TestCloudWatchLogsWriter
 
         assertUnsentMessageQueueSize(0);
 
-        testLog.assertLogSize(1);
-        testLog.assertLogEntry(0, Level.WARN, "DataAlreadyAcceptedException.* 1 .*foo.*bar");
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.WARN, "DataAlreadyAcceptedException.* 1 .*foo.*bar");
     }
 
 
@@ -393,8 +393,8 @@ public class TestCloudWatchLogsWriter
 
         assertUnsentMessageQueueSize(1);
 
-        testLog.assertLogSize(1);
-        testLog.assertLogEntry(0, Level.WARN, "ServiceUnavailableException writing to.*foo.*bar");
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.WARN, "ServiceUnavailableException writing to.*foo.*bar");
     }
 
 
@@ -425,8 +425,8 @@ public class TestCloudWatchLogsWriter
 
         assertUnsentMessageQueueSize(1);
 
-        testLog.assertLogSize(1);
-        testLog.assertLogEntry(0, Level.WARN, "ServiceUnavailableException writing to.*foo.*bar");
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.WARN, "ServiceUnavailableException writing to.*foo.*bar");
     }
 
 
@@ -464,7 +464,7 @@ public class TestCloudWatchLogsWriter
 
         assertUnsentMessageQueueSize(0);
 
-        testLog.assertLogSize(0);
+        logCapture.assertLogSize(0);
     }
 
 
@@ -488,8 +488,8 @@ public class TestCloudWatchLogsWriter
 
         assertUnsentMessageQueueSize(0);
 
-        testLog.assertLogSize(1);
-        testLog.assertLogEntry(0, Level.DEBUG, "shutdown called.*foo.*bar.*");
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.DEBUG, "shutdown called.*foo.*bar.*");
 
         try
         {
@@ -540,4 +540,27 @@ public class TestCloudWatchLogsWriter
         assertInRange("flush invoked immediately after shutdown", shutdownAt, shutdownAt + 100, writer.getLastFlushTime());
     }
 
+
+    @Test
+    public void testBatchLogging() throws Exception
+    {
+        MockAWSLogs mock = new MockAWSLogs("foo", "bar");
+        AWSLogs client = mock.getInstance();
+
+        writer = new CloudWatchLogsWriter(client, "foo", "bar")
+                 .withBatchLogging(true);
+
+        writer.add("batch 1 message 1");
+        writer.flush();
+
+        writer.add("batch 2 message 1");
+        writer.add("batch 2 message 2");
+        writer.flush();
+
+        mock.assertInvocationCount("putLogEvents",          2);
+
+        logCapture.assertLogSize(2);
+        logCapture.assertLogEntry(0, Level.DEBUG, "sending.* 1 .*events.*foo.*bar");
+        logCapture.assertLogEntry(1, Level.DEBUG, "sending.* 2 .*events.*foo.*bar");
+    }
 }
