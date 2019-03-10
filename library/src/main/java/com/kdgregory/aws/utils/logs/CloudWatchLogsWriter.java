@@ -52,6 +52,8 @@ public class CloudWatchLogsWriter
     private String logStreamName;
     private ScheduledExecutorService executor;
     private long interval;
+    
+    private boolean logBatches;
 
     private LinkedBlockingDeque<QueuedMessage> unsentMessages = new LinkedBlockingDeque<QueuedMessage>();
     private volatile boolean isShutdown = false;
@@ -109,6 +111,20 @@ public class CloudWatchLogsWriter
         this.interval = interval;
 
         executor.schedule(new BackgroundTask(), interval, TimeUnit.MILLISECONDS);
+    }
+    
+    
+//----------------------------------------------------------------------------
+//  Post-construction API
+//----------------------------------------------------------------------------
+    
+    /**
+     *  Enables debug-level logging when a batch is written.
+     */
+    public CloudWatchLogsWriter withBatchLogging(boolean value)
+    {
+        logBatches = value;
+        return this;
     }
 
 //----------------------------------------------------------------------------
@@ -397,6 +413,11 @@ public class CloudWatchLogsWriter
      */
     private String attemptToSend(List<QueuedMessage> batch, String uploadSequenceToken)
     {
+        if (logBatches && logger.isDebugEnabled())
+        {
+            logger.debug("sending batch of " + batch.size() + " messages to " + logGroupName + " / " + logStreamName);
+        }
+        
         List<InputLogEvent> events = new ArrayList<InputLogEvent>(batch.size());
         for (QueuedMessage message : batch)
         {

@@ -130,7 +130,8 @@ public class TestCloudWatchLogs
 
         long now = System.currentTimeMillis();
 
-        CloudWatchLogsWriter writer = new CloudWatchLogsWriter(client, logGroupName, logStreamName);
+        CloudWatchLogsWriter writer = new CloudWatchLogsWriter(client, logGroupName, logStreamName)
+                                      .withBatchLogging(true);
 
         for (int ii = 0 ; ii < numRecords ; ii++)
         {
