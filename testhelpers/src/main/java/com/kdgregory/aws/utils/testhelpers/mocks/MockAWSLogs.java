@@ -265,6 +265,11 @@ extends AbstractMock<AWSLogs>
     {
         verifyStream(request.getLogGroupName(), request.getLogStreamName());
 
+        if (! uploadSequenceToken.equals(request.getSequenceToken()))
+        {
+            throw new InvalidSequenceTokenException("received " + request.getSequenceToken() + ", expected " + uploadSequenceToken);
+        }
+
         allMessages.addAll(request.getLogEvents());
 
         uploadSequenceToken = UUID.randomUUID().toString();
@@ -303,5 +308,11 @@ extends AbstractMock<AWSLogs>
         return new GetLogEventsResult()
                .withEvents(events.subList(startOffset, endOffset))
                .withNextForwardToken(String.valueOf(endOffset));
+    }
+
+
+    public void shutdown()
+    {
+        // nothing happening here
     }
 }
