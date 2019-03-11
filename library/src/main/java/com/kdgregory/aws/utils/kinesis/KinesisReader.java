@@ -566,15 +566,15 @@ implements Iterable<Record>
 
     private void describeShards()
     {
-        shards = KinesisUtils.describeShards(client, streamName, timeout);
+        shards = KinesisUtil.describeShards(client, streamName, timeout);
         if (shards == null)
         {
             logger.warn("failed to retrieve shard description: stream = " + streamName);
             return;
         }
 
-        shardsById = KinesisUtils.toMapById(shards);
-        shardsByParentId = KinesisUtils.toMapByParentId(shards);
+        shardsById = KinesisUtil.toMapById(shards);
+        shardsByParentId = KinesisUtil.toMapByParentId(shards);
     }
 
 
@@ -596,7 +596,7 @@ implements Iterable<Record>
 
             long currentTimeout = timeoutAt - System.currentTimeMillis();
             String shardIterator = (currentTimeout > 0)
-                                 ? KinesisUtils.retrieveShardIterator(client, streamName, shardId, iteratorType, offset, null, currentTimeout)
+                                 ? KinesisUtil.retrieveShardIterator(client, streamName, shardId, iteratorType, offset, null, currentTimeout)
                                  : null;
             if (shardIterator == null)
             {

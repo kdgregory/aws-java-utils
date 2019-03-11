@@ -38,7 +38,7 @@ import com.amazonaws.services.kinesis.model.*;
 import com.amazonaws.util.BinaryUtils;
 
 import com.kdgregory.aws.utils.kinesis.KinesisReader;
-import com.kdgregory.aws.utils.kinesis.KinesisUtils;
+import com.kdgregory.aws.utils.kinesis.KinesisUtil;
 import com.kdgregory.aws.utils.kinesis.KinesisWriter;
 
 
@@ -178,11 +178,11 @@ public class TestKinesis
         streamName = "TestKinesis-testBasicOperation-1123";
 
         logger.debug("testBasicOperation: creating stream");
-        KinesisUtils.createStream(client, streamName, 1, 30000);
+        KinesisUtil.createStream(client, streamName, 1, 30000);
 
         DescribeStreamRequest describeRequest = new DescribeStreamRequest().withStreamName(streamName);
-        StreamDescription streamDesc = KinesisUtils.describeStream(client, describeRequest, 2000);
-        assertEquals("stream status after creation", StreamStatus.ACTIVE, KinesisUtils.getStatus(streamDesc));
+        StreamDescription streamDesc = KinesisUtil.describeStream(client, describeRequest, 2000);
+        assertEquals("stream status after creation", StreamStatus.ACTIVE, KinesisUtil.getStatus(streamDesc));
 
         logger.debug("testBasicOperation: writing messages in several batches");
         writeMessages("foo", "bar", 10);
@@ -197,8 +197,8 @@ public class TestKinesis
         assertRecords("all messages", records, 40, 1, 1, CollectionUtil.asSet("bar", "baz"));
 
         logger.debug("testBasicOperation: deleting stream");
-        KinesisUtils.deleteStream(client, streamName, 1000);
-        assertNull("stream was deleted", KinesisUtils.waitForStatus(client, streamName, null, 300000));
+        KinesisUtil.deleteStream(client, streamName, 1000);
+        assertNull("stream was deleted", KinesisUtil.waitForStatus(client, streamName, null, 300000));
     }
 
 
@@ -210,7 +210,7 @@ public class TestKinesis
         streamName = "TestKinesis-testIncreaseShardCount-1123";
 
         logger.debug("testIncreaseShardCount: creating stream");
-        KinesisUtils.createStream(client, streamName, 2, 60000);
+        KinesisUtil.createStream(client, streamName, 2, 60000);
 
         logger.debug("testIncreaseShardCount: writing and reading initial batches of messages");
         writeMessages(null, "init 1", 10);
@@ -225,7 +225,7 @@ public class TestKinesis
         Map<String,String> savedSequenceNumbers = reader.getCurrentSequenceNumbers();
 
         logger.debug("testIncreaseShardCount: resharding stream");
-        StreamStatus reshardStatus = KinesisUtils.reshard(client, streamName, 3, 300000);
+        StreamStatus reshardStatus = KinesisUtil.reshard(client, streamName, 3, 300000);
         assertEquals("reshard successful", StreamStatus.ACTIVE, reshardStatus);
 
         logger.debug("testIncreaseShardCount: writing and reading final batches of messages");
@@ -249,8 +249,8 @@ public class TestKinesis
                       CollectionUtil.asSet("init 1", "init 2", "init 3", "final 1", "final 2", "final 3"));
 
         logger.debug("testIncreaseShardCount: deleting stream");
-        KinesisUtils.deleteStream(client, streamName, 1000);
-        assertNull("stream was deleted", KinesisUtils.waitForStatus(client, streamName, null, 300000));
+        KinesisUtil.deleteStream(client, streamName, 1000);
+        assertNull("stream was deleted", KinesisUtil.waitForStatus(client, streamName, null, 300000));
     }
 
 
@@ -262,7 +262,7 @@ public class TestKinesis
         streamName = "TestKinesis-testDecreaseShardCount-1123";
 
         logger.debug("testDecreaseShardCount: creating stream");
-        KinesisUtils.createStream(client, streamName, 3, 60000);
+        KinesisUtil.createStream(client, streamName, 3, 60000);
 
         logger.debug("testDecreaseShardCount: writing and reading initial batches of messages");
         writeMessages(null, "init 1", 10);
@@ -277,7 +277,7 @@ public class TestKinesis
         Map<String,String> savedSequenceNumbers = reader.getCurrentSequenceNumbers();
 
         logger.debug("testDecreaseShardCount: resharding stream");
-        StreamStatus reshardStatus = KinesisUtils.reshard(client, streamName, 2, 300000);
+        StreamStatus reshardStatus = KinesisUtil.reshard(client, streamName, 2, 300000);
         assertEquals("reshard successful", StreamStatus.ACTIVE, reshardStatus);
 
         logger.debug("testDecreaseShardCount: writing and reading final batches of messages");
@@ -301,8 +301,8 @@ public class TestKinesis
                       CollectionUtil.asSet("init 1", "init 2", "init 3", "final 1", "final 2", "final 3"));
 
         logger.debug("testDecreaseShardCount: deleting stream");
-        KinesisUtils.deleteStream(client, streamName, 1000);
-        assertNull("stream was deleted", KinesisUtils.waitForStatus(client, streamName, null, 300000));
+        KinesisUtil.deleteStream(client, streamName, 1000);
+        assertNull("stream was deleted", KinesisUtil.waitForStatus(client, streamName, null, 300000));
     }
 
 
@@ -314,7 +314,7 @@ public class TestKinesis
         streamName = "TestKinesis-testLargeRecords-1123";
 
         logger.debug("testLargeRecords: creating stream");
-        KinesisUtils.createStream(client, streamName, 1, 30000);
+        KinesisUtil.createStream(client, streamName, 1, 30000);
 
         KinesisWriter writer = new KinesisWriter(client, streamName);
 
@@ -346,7 +346,7 @@ public class TestKinesis
                      records.get(4).getPartitionKey() + recordsAsText.get(4));
 
         logger.debug("testLargeRecords: deleting stream");
-        KinesisUtils.deleteStream(client, streamName, 1000);
-        assertNull("stream was deleted", KinesisUtils.waitForStatus(client, streamName, null, 300000));
+        KinesisUtil.deleteStream(client, streamName, 1000);
+        assertNull("stream was deleted", KinesisUtil.waitForStatus(client, streamName, null, 300000));
     }
 }

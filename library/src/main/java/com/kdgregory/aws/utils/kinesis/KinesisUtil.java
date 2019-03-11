@@ -35,9 +35,10 @@ import com.kdgregory.aws.utils.CommonUtils;
  *  exponential backoff when throttled, and handle the case where AWS requires
  *  multiple calls to retrieve all information.
  */
-public class KinesisUtils
+public class KinesisUtil
 {
-    private static Log logger = LogFactory.getLog(KinesisUtils.class);
+    private static Log logger = LogFactory.getLog(KinesisUtil.class);
+
 
     /**
      *  Extracts the status from a stream description and converts it from a string
@@ -410,11 +411,11 @@ public class KinesisUtils
 
         while (System.currentTimeMillis() < timeoutAt)
         {
-            StreamStatus lastStatus = KinesisUtils.waitForStatus(client, streamName, StreamStatus.ACTIVE, timeoutAt - System.currentTimeMillis());
+            StreamStatus lastStatus = KinesisUtil.waitForStatus(client, streamName, StreamStatus.ACTIVE, timeoutAt - System.currentTimeMillis());
             if (lastStatus == null)
                 break;
 
-            List<Shard> shards = KinesisUtils.describeShards(client, streamName, timeoutAt - System.currentTimeMillis());
+            List<Shard> shards = KinesisUtil.describeShards(client, streamName, timeoutAt - System.currentTimeMillis());
             if (shards == null)
                 break;
 

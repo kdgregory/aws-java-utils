@@ -43,7 +43,7 @@ import com.amazonaws.services.kinesis.model.*;
 /**
  *  Mock-object tests of KinesisUtils.
  */
-public class TestKinesisUtils
+public class TestKinesisUtil
 {
     private LinkedList<LoggingEvent> loggingEvents = new LinkedList<LoggingEvent>();
 
@@ -54,7 +54,7 @@ public class TestKinesisUtils
     @Before
     public void setUp()
     {
-        Logger utilsLogger = Logger.getLogger(KinesisUtils.class);
+        Logger utilsLogger = Logger.getLogger(KinesisUtil.class);
         utilsLogger.setLevel(Level.DEBUG);
         utilsLogger.addAppender(new AppenderSkeleton()
         {
@@ -233,7 +233,7 @@ public class TestKinesisUtils
         };
         AmazonKinesis client = mock.getInstance();
 
-        List<Shard> shards = KinesisUtils.describeShards(client, STREAM_NAME, 1000);
+        List<Shard> shards = KinesisUtil.describeShards(client, STREAM_NAME, 1000);
         assertEquals("invocation count",        1, mock.describeInvocationCount.get());
         assertEquals("returned expected list",  SHARDS_1, shards);
     }
@@ -259,7 +259,7 @@ public class TestKinesisUtils
         };
         AmazonKinesis client = mock.getInstance();
 
-        List<Shard> shards = KinesisUtils.describeShards(client, STREAM_NAME, 1000);
+        List<Shard> shards = KinesisUtil.describeShards(client, STREAM_NAME, 1000);
         assertEquals("invocation count",        2, mock.describeInvocationCount.get());
         assertEquals("returned expected list",  CollectionUtil.combine(new ArrayList<Shard>(), SHARDS_1, SHARDS_2), shards);
     }
@@ -271,7 +271,7 @@ public class TestKinesisUtils
         AmazonKinesis client = new StreamDescriberMock(STREAM_NAME, ResourceNotFoundException.class)
                                .getInstance();
 
-        List<Shard> shards = KinesisUtils.describeShards(client, STREAM_NAME, 1000);
+        List<Shard> shards = KinesisUtil.describeShards(client, STREAM_NAME, 1000);
         assertEquals("returned empty", null, shards);
     }
 
@@ -305,7 +305,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        List<Shard> shards = KinesisUtils.describeShards(client, "example", 1000);
+        List<Shard> shards = KinesisUtil.describeShards(client, "example", 1000);
         assertEquals("returned expected list", expected, shards);
         assertEquals("number of calls", 4, invocationCount.get());
     }
@@ -332,7 +332,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        List<Shard> shards = KinesisUtils.describeShards(client, "example", 150);
+        List<Shard> shards = KinesisUtil.describeShards(client, "example", 150);
         assertEquals("did not return anything", null, shards);
         assertEquals("number of calls", 3, invocationCount.get());
     }
@@ -345,7 +345,7 @@ public class TestKinesisUtils
         AmazonKinesis client = mock.getInstance();
 
         long start = System.currentTimeMillis();
-        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, STREAM_NAME, StreamStatus.ACTIVE, 500);
+        StreamStatus lastStatus = KinesisUtil.waitForStatus(client, STREAM_NAME, StreamStatus.ACTIVE, 500);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("status",              StreamStatus.ACTIVE, lastStatus);
@@ -361,7 +361,7 @@ public class TestKinesisUtils
         AmazonKinesis client = mock.getInstance();
 
         long start = System.currentTimeMillis();
-        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, STREAM_NAME, StreamStatus.ACTIVE, 250);
+        StreamStatus lastStatus = KinesisUtil.waitForStatus(client, STREAM_NAME, StreamStatus.ACTIVE, 250);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("status",              StreamStatus.CREATING, lastStatus);
@@ -385,7 +385,7 @@ public class TestKinesisUtils
         //  - return active, no sleep
 
         long start = System.currentTimeMillis();
-        StreamStatus lastStatus = KinesisUtils.waitForStatus(client, STREAM_NAME, StreamStatus.ACTIVE, 500);
+        StreamStatus lastStatus = KinesisUtil.waitForStatus(client, STREAM_NAME, StreamStatus.ACTIVE, 500);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("status",              StreamStatus.ACTIVE, lastStatus);
@@ -418,7 +418,7 @@ public class TestKinesisUtils
         //  - active, no sleep
 
         long start = System.currentTimeMillis();
-        StreamStatus status = KinesisUtils.createStream(client, STREAM_NAME, 3, 1000L);
+        StreamStatus status = KinesisUtil.createStream(client, STREAM_NAME, 3, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("stream status",                   StreamStatus.ACTIVE, status);
@@ -452,7 +452,7 @@ public class TestKinesisUtils
         //  - success
 
         long start = System.currentTimeMillis();
-        StreamStatus status = KinesisUtils.createStream(client, STREAM_NAME, 3, 1000L);
+        StreamStatus status = KinesisUtil.createStream(client, STREAM_NAME, 3, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("stream status",                               StreamStatus.ACTIVE, status);
@@ -478,7 +478,7 @@ public class TestKinesisUtils
         };
         AmazonKinesis client = mock.getInstance();
 
-        StreamStatus status = KinesisUtils.createStream(client, STREAM_NAME, 3, 500L);
+        StreamStatus status = KinesisUtil.createStream(client, STREAM_NAME, 3, 500L);
 
         assertEquals("stream status",                               StreamStatus.ACTIVE, status);
         assertEquals("invocations of createStream",                 1, createInvocationCount.get());
@@ -502,7 +502,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        boolean status = KinesisUtils.deleteStream(client, STREAM_NAME, 500L);
+        boolean status = KinesisUtil.deleteStream(client, STREAM_NAME, 500L);
 
         assertTrue("returned status indicates success",         status);
         assertEquals("invocations of deleteStream",             1, invocationCount.get());
@@ -529,7 +529,7 @@ public class TestKinesisUtils
         //  - throttled, sleep for 200 ms
 
         long start = System.currentTimeMillis();
-        boolean status = KinesisUtils.deleteStream(client, STREAM_NAME, 250L);
+        boolean status = KinesisUtil.deleteStream(client, STREAM_NAME, 250L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertFalse("returned status indicates failure",        status);
@@ -553,7 +553,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        boolean status = KinesisUtils.deleteStream(client, STREAM_NAME, 250L);
+        boolean status = KinesisUtil.deleteStream(client, STREAM_NAME, 250L);
 
         assertFalse("returned status indicates failure",        status);
         assertEquals("invocations of deleteStream",             1, invocationCount.get());
@@ -582,7 +582,7 @@ public class TestKinesisUtils
         AmazonKinesis client = mock.getInstance();
 
         long start = System.currentTimeMillis();
-        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
+        StreamStatus status = KinesisUtil.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
@@ -628,7 +628,7 @@ public class TestKinesisUtils
 
         AmazonKinesis client = mock.getInstance();
         long start = System.currentTimeMillis();
-        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
+        StreamStatus status = KinesisUtil.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
@@ -678,7 +678,7 @@ public class TestKinesisUtils
         AmazonKinesis client = mock.getInstance();
 
         long start = System.currentTimeMillis();
-        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
+        StreamStatus status = KinesisUtil.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
@@ -714,7 +714,7 @@ public class TestKinesisUtils
 
         AmazonKinesis client = mock.getInstance();
 
-        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
+        StreamStatus status = KinesisUtil.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
 
         assertEquals("final stream status",                             null, status);
         assertEquals("invocations of describeStream",                   2,  mock.describeInvocationCount.get());
@@ -748,7 +748,7 @@ public class TestKinesisUtils
         AmazonKinesis client = mock.getInstance();
 
         long start = System.currentTimeMillis();
-        StreamStatus status = KinesisUtils.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
+        StreamStatus status = KinesisUtil.updateRetentionPeriod(client, STREAM_NAME, 36, 1000L);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("final stream status",                             StreamStatus.ACTIVE, status);
@@ -805,7 +805,7 @@ public class TestKinesisUtils
         };
 
         AmazonKinesis client = mock.getInstance();
-        StreamStatus status = KinesisUtils.reshard(client, STREAM_NAME, 2, 1000);
+        StreamStatus status = KinesisUtil.reshard(client, STREAM_NAME, 2, 1000);
 
         assertEquals("returned status",             StreamStatus.ACTIVE, status);
         assertEquals("update invocation count",     1, updateShardCountInvocationCount.get());
@@ -832,7 +832,7 @@ public class TestKinesisUtils
         AmazonKinesis client = mock.getInstance();
 
         long start = System.currentTimeMillis();
-        StreamStatus status = KinesisUtils.reshard(client, STREAM_NAME, 2, 250);
+        StreamStatus status = KinesisUtil.reshard(client, STREAM_NAME, 2, 250);
         long elapsed = System.currentTimeMillis() - start;
 
         assertEquals("returned status",             null, status);
@@ -884,7 +884,7 @@ public class TestKinesisUtils
         };
 
         AmazonKinesis client = mock.getInstance();
-        KinesisUtils.reshard(client, "example", 2, 1000);
+        KinesisUtil.reshard(client, "example", 2, 1000);
     }
 
 
@@ -906,7 +906,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.LATEST, "123", NOW, 1000L));
+        assertNotNull("return value", KinesisUtil.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.LATEST, "123", NOW, 1000L));
     }
 
 
@@ -927,7 +927,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.TRIM_HORIZON, "123", NOW, 1000L));
+        assertNotNull("return value", KinesisUtil.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.TRIM_HORIZON, "123", NOW, 1000L));
     }
 
 
@@ -948,7 +948,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AT_SEQUENCE_NUMBER, "123", NOW, 1000L));
+        assertNotNull("return value", KinesisUtil.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AT_SEQUENCE_NUMBER, "123", NOW, 1000L));
     }
 
 
@@ -969,7 +969,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AFTER_SEQUENCE_NUMBER, "123", NOW, 1000L));
+        assertNotNull("return value", KinesisUtil.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AFTER_SEQUENCE_NUMBER, "123", NOW, 1000L));
     }
 
 
@@ -990,7 +990,7 @@ public class TestKinesisUtils
             }
         }.getInstance();
 
-        assertNotNull("return value", KinesisUtils.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AT_TIMESTAMP, "123", NOW, 1000L));
+        assertNotNull("return value", KinesisUtil.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AT_TIMESTAMP, "123", NOW, 1000L));
     }
 
 
@@ -1007,7 +1007,7 @@ public class TestKinesisUtils
         }.getInstance();
 
         long start = System.currentTimeMillis();
-        assertNull("return value", KinesisUtils.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AT_TIMESTAMP, "123", NOW, 250L));
+        assertNull("return value", KinesisUtil.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AT_TIMESTAMP, "123", NOW, 250L));
         long elapsed = System.currentTimeMillis() - start;
         assertApproximate("elapsed time", 300, elapsed, 10);
     }
@@ -1022,14 +1022,14 @@ public class TestKinesisUtils
         Shard shard4 = new Shard().withShardId("shard-0004").withParentShardId("shard-0001");
         List<Shard> allShards = Arrays.asList(shard1, shard2, shard3, shard4);
 
-        Map<String,Shard> shardsById = KinesisUtils.toMapById(allShards);
+        Map<String,Shard> shardsById = KinesisUtil.toMapById(allShards);
         assertEquals("shard map size", 4, shardsById.size());
         for (Shard shard : allShards)
         {
             assertSame("shard map contains " + shard.getShardId(), shard, shardsById.get(shard.getShardId()));
         }
 
-        Map<String,List<Shard>> shardsByParent = KinesisUtils.toMapByParentId(allShards);
+        Map<String,List<Shard>> shardsByParent = KinesisUtil.toMapByParentId(allShards);
         assertEquals("parent map size", 2, shardsByParent.size());
         assertEquals("ultimate parents",  Arrays.asList(shard1, shard2), shardsByParent.get(null));
         assertEquals("expected children", Arrays.asList(shard3, shard4), shardsByParent.get(shard1.getShardId()));
