@@ -17,7 +17,6 @@ package com.kdgregory.aws.utils.kinesis;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -26,10 +25,7 @@ import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
-import org.apache.log4j.AppenderSkeleton;
 import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
-import org.apache.log4j.spi.LoggingEvent;
 
 import net.sf.kdgcommons.collections.CollectionUtil;
 import net.sf.kdgcommons.test.NumericAsserts;
@@ -39,13 +35,15 @@ import static net.sf.kdgcommons.test.NumericAsserts.*;
 import com.amazonaws.services.kinesis.AmazonKinesis;
 import com.amazonaws.services.kinesis.model.*;
 
+import com.kdgregory.aws.utils.testhelpers.Log4JCapturingAppender;
+
 
 /**
  *  Mock-object tests of KinesisUtils.
  */
 public class TestKinesisUtil
 {
-    private LinkedList<LoggingEvent> loggingEvents = new LinkedList<LoggingEvent>();
+    private Log4JCapturingAppender logCapture;
 
 //----------------------------------------------------------------------------
 //  Common setup
@@ -54,28 +52,8 @@ public class TestKinesisUtil
     @Before
     public void setUp()
     {
-        Logger utilsLogger = Logger.getLogger(KinesisUtil.class);
-        utilsLogger.setLevel(Level.DEBUG);
-        utilsLogger.addAppender(new AppenderSkeleton()
-        {
-            @Override
-            public void close()
-            {
-                // no-op
-            }
-
-            @Override
-            public boolean requiresLayout()
-            {
-                return false;
-            }
-
-            @Override
-            protected void append(LoggingEvent event)
-            {
-                loggingEvents.add(event);
-            }
-        });
+        logCapture = Log4JCapturingAppender.getInstance();
+        logCapture.reset();
     }
 
 //----------------------------------------------------------------------------
@@ -236,11 +214,13 @@ public class TestKinesisUtil
         List<Shard> shards = KinesisUtil.describeShards(client, STREAM_NAME, 1000);
         assertEquals("invocation count",        1, mock.describeInvocationCount.get());
         assertEquals("returned expected list",  SHARDS_1, shards);
+
+        logCapture.assertLogSize(0);
     }
 
 
     @Test
-    public void testDescribeShardsMultiRetrieve() throws Exception
+    public void testDescribeShardsPaginatedRetrieve() throws Exception
     {
         StreamDescriberMock mock = new StreamDescriberMock(STREAM_NAME, StreamStatus.ACTIVE)
         {
@@ -262,6 +242,8 @@ public class TestKinesisUtil
         List<Shard> shards = KinesisUtil.describeShards(client, STREAM_NAME, 1000);
         assertEquals("invocation count",        2, mock.describeInvocationCount.get());
         assertEquals("returned expected list",  CollectionUtil.combine(new ArrayList<Shard>(), SHARDS_1, SHARDS_2), shards);
+
+        logCapture.assertLogSize(0);
     }
 
 
@@ -273,11 +255,13 @@ public class TestKinesisUtil
 
         List<Shard> shards = KinesisUtil.describeShards(client, STREAM_NAME, 1000);
         assertEquals("returned empty", null, shards);
+
+        logCapture.assertLogSize(0);
     }
 
 
     @Test
-    public void testDescribeShardsRequestThrottling() throws Exception
+    public void testDescribeShardsThrottling() throws Exception
     {
         final List<Shard> expected = CollectionUtil.combine(new ArrayList<Shard>(), SHARDS_1, SHARDS_2);
         final AtomicInteger invocationCount = new AtomicInteger(0);
@@ -308,11 +292,13 @@ public class TestKinesisUtil
         List<Shard> shards = KinesisUtil.describeShards(client, "example", 1000);
         assertEquals("returned expected list", expected, shards);
         assertEquals("number of calls", 4, invocationCount.get());
+
+        logCapture.assertLogSize(0);
     }
 
 
     @Test
-    public void testDescribeShardsTimoutExceeded() throws Exception
+    public void testDescribeShardsTimeout() throws Exception
     {
         final AtomicInteger invocationCount = new AtomicInteger(0);
 
@@ -335,6 +321,9 @@ public class TestKinesisUtil
         List<Shard> shards = KinesisUtil.describeShards(client, "example", 150);
         assertEquals("did not return anything", null, shards);
         assertEquals("number of calls", 3, invocationCount.get());
+
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.WARN, "describeStream timeout: example");
     }
 
 
@@ -351,6 +340,8 @@ public class TestKinesisUtil
         assertEquals("status",              StreamStatus.ACTIVE, lastStatus);
         assertEquals("invocation count",    3, mock.describeInvocationCount.get());
         assertApproximate("elapsed time",   200, elapsed, 10);
+
+        logCapture.assertLogSize(0);
     }
 
 
@@ -367,6 +358,9 @@ public class TestKinesisUtil
         assertEquals("status",              StreamStatus.CREATING, lastStatus);
         assertEquals("invocation count",    3, mock.describeInvocationCount.get());
         assertApproximate("elapsed time",   300, elapsed, 10);
+
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.WARN, "waitForStatus timeout: " + STREAM_NAME);
     }
 
 
@@ -391,6 +385,8 @@ public class TestKinesisUtil
         assertEquals("status",              StreamStatus.ACTIVE, lastStatus);
         assertEquals("invocation count",    4, mock.describeInvocationCount.get());
         assertApproximate("elapsed time",   400, elapsed, 25);
+
+        logCapture.assertLogSize(0);
     }
 
 
@@ -425,6 +421,9 @@ public class TestKinesisUtil
         assertEquals("invocations of createStream",     1, createInvocationCount.get());
         assertEquals("invocations of describeStream",   3, mock.describeInvocationCount.get());
         assertApproximate("elapsed time",               200, elapsed, 10);
+
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.DEBUG, "createStream: " + STREAM_NAME + ".* 3 shards");
     }
 
 
@@ -459,6 +458,9 @@ public class TestKinesisUtil
         assertApproximate("elapsed time",                           300, elapsed, 10);
         assertEquals("invocations of createStream",                 3, createInvocationCount.get());
         assertEquals("invocations of describeStream",               1, mock.describeInvocationCount.get());
+
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.DEBUG, "createStream: " + STREAM_NAME + ".* 3 shards");
     }
 
 
@@ -483,6 +485,10 @@ public class TestKinesisUtil
         assertEquals("stream status",                               StreamStatus.ACTIVE, status);
         assertEquals("invocations of createStream",                 1, createInvocationCount.get());
         assertEquals("invocations of describeStream",               1, mock.describeInvocationCount.get());
+
+        logCapture.assertLogSize(2);
+        logCapture.assertLogEntry(0, Level.DEBUG, "createStream: " + STREAM_NAME + ".* 3 shards");
+        logCapture.assertLogEntry(1, Level.WARN, "createStream .*existing stream: " + STREAM_NAME);
     }
 
 
@@ -506,11 +512,14 @@ public class TestKinesisUtil
 
         assertTrue("returned status indicates success",         status);
         assertEquals("invocations of deleteStream",             1, invocationCount.get());
+
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.DEBUG, "deleteStream: " + STREAM_NAME);
     }
 
 
     @Test
-    public void testDeleteStreamThrottling() throws Exception
+    public void testDeleteStreamTimeout() throws Exception
     {
         final AtomicInteger invocationCount = new AtomicInteger(0);
 
@@ -535,6 +544,10 @@ public class TestKinesisUtil
         assertFalse("returned status indicates failure",        status);
         assertApproximate("elapsed time",                       300, elapsed, 10);
         assertEquals("invocations of deleteStream",             2, invocationCount.get());
+
+        logCapture.assertLogSize(2);
+        logCapture.assertLogEntry(0, Level.DEBUG, "deleteStream: " + STREAM_NAME);
+        logCapture.assertLogEntry(1, Level.WARN, "deleteStream timeout.*" + STREAM_NAME);
     }
 
 
@@ -557,6 +570,10 @@ public class TestKinesisUtil
 
         assertFalse("returned status indicates failure",        status);
         assertEquals("invocations of deleteStream",             1, invocationCount.get());
+
+        logCapture.assertLogSize(2);
+        logCapture.assertLogEntry(0, Level.DEBUG, "deleteStream: " + STREAM_NAME);
+        logCapture.assertLogEntry(1, Level.WARN,  "deleteStream.*nonexistent.*: " + STREAM_NAME);
     }
 
 
@@ -591,6 +608,9 @@ public class TestKinesisUtil
         assertEquals("invocations of increaseStreamRetentionPeriod",    1,  mock.increaseInvocationCount.get());
         assertEquals("invocations of decreaseStreamRetentionPeriod",    0,  mock.decreaseInvocationCount.get());
         assertApproximate("elapsed time",                               100, elapsed, 10);
+
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.DEBUG, "updateRetentionPeriod: " + STREAM_NAME + " to 36 hours");
     }
 
 
@@ -636,6 +656,9 @@ public class TestKinesisUtil
         assertEquals("invocations of describeStream",                   7,  mock.describeInvocationCount.get());
         assertEquals("invocations of increaseStreamRetentionPeriod",    3,  mock.increaseInvocationCount.get());
         assertApproximate("elapsed time",                               300, elapsed, 10);
+
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.DEBUG, "updateRetentionPeriod: " + STREAM_NAME + " to 36 hours");
     }
 
 
@@ -687,6 +710,9 @@ public class TestKinesisUtil
         assertEquals("invocations of increaseStreamRetentionPeriod",    1,  mock.increaseInvocationCount.get());
         assertEquals("invocations of decreaseStreamRetentionPeriod",    1,  mock.decreaseInvocationCount.get());
         assertApproximate("elapsed time",                               100, elapsed, 10);
+
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.DEBUG, "updateRetentionPeriod: " + STREAM_NAME + " to 36 hours");
     }
 
 
@@ -720,6 +746,10 @@ public class TestKinesisUtil
         assertEquals("invocations of describeStream",                   2,  mock.describeInvocationCount.get());
         assertEquals("invocations of increaseStreamRetentionPeriod",    1,  mock.increaseInvocationCount.get());
         assertEquals("invocations of decreaseStreamRetentionPeriod",    0,  mock.decreaseInvocationCount.get());
+
+        logCapture.assertLogSize(2);
+        logCapture.assertLogEntry(0, Level.DEBUG, "updateRetentionPeriod: " + STREAM_NAME + " to 36 hours");
+        logCapture.assertLogEntry(1, Level.WARN,  "updateRetentionPeriod.*nonexistent.*: " + STREAM_NAME );
     }
 
 
@@ -757,6 +787,9 @@ public class TestKinesisUtil
         assertEquals("invocations of increaseStreamRetentionPeriod",    0,  mock.increaseInvocationCount.get());
         assertEquals("invocations of decreaseStreamRetentionPeriod",    1,  mock.decreaseInvocationCount.get());
         assertApproximate("elapsed time",                               100, elapsed, 10);
+
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.DEBUG, "updateRetentionPeriod: " + STREAM_NAME + " to 36 hours");
     }
 
 
@@ -811,6 +844,9 @@ public class TestKinesisUtil
         assertEquals("update invocation count",     1, updateShardCountInvocationCount.get());
         // first describe gets UPDATING, second gets ACTIVE, third gets shards
         assertEquals("describe invocation count",   3, mock.describeInvocationCount.get());
+
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.DEBUG, "reshard: " + STREAM_NAME + ".* 2 shards");
     }
 
 
@@ -848,19 +884,10 @@ public class TestKinesisUtil
         assertEquals("describe invocation count",   3, mock.describeInvocationCount.get());
         NumericAsserts.assertInRange("elapsed time", 200, 350, elapsed);
 
-        boolean wasWarningEmitted = false;
-        for (LoggingEvent logEvent : loggingEvents)
-        {
-            if ((logEvent.getLevel() == Level.WARN)
-                && logEvent.getRenderedMessage().contains("reshard")
-                && logEvent.getRenderedMessage().contains("timed out")
-                && logEvent.getRenderedMessage().contains(STREAM_NAME))
-            {
-                wasWarningEmitted = true;
-            }
-        }
-        assertTrue("log included timeout warning", wasWarningEmitted);
-
+        logCapture.assertLogSize(3);
+        logCapture.assertLogEntry(0, Level.DEBUG, "reshard: " + STREAM_NAME + ".* 2 shards");
+        logCapture.assertLogEntry(1, Level.WARN,  "waitForStatus timeout: " + STREAM_NAME);
+        logCapture.assertLogEntry(2, Level.WARN,  "reshard timeout.* " + STREAM_NAME);
     }
 
 
@@ -885,6 +912,9 @@ public class TestKinesisUtil
 
         AmazonKinesis client = mock.getInstance();
         KinesisUtil.reshard(client, "example", 2, 1000);
+
+        // we get the exception, so there's no logging of the error
+        logCapture.assertLogEntry(0, Level.DEBUG, "reshard: " + STREAM_NAME + ".* 2 shards");
     }
 
 
@@ -907,6 +937,9 @@ public class TestKinesisUtil
         }.getInstance();
 
         assertNotNull("return value", KinesisUtil.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.LATEST, "123", NOW, 1000L));
+
+        // this is called frequently enough that only trace-level logging is appropriate
+        logCapture.assertLogSize(0);
     }
 
 
@@ -928,6 +961,8 @@ public class TestKinesisUtil
         }.getInstance();
 
         assertNotNull("return value", KinesisUtil.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.TRIM_HORIZON, "123", NOW, 1000L));
+
+        logCapture.assertLogSize(0);
     }
 
 
@@ -949,6 +984,8 @@ public class TestKinesisUtil
         }.getInstance();
 
         assertNotNull("return value", KinesisUtil.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AT_SEQUENCE_NUMBER, "123", NOW, 1000L));
+
+        logCapture.assertLogSize(0);
     }
 
 
@@ -970,6 +1007,8 @@ public class TestKinesisUtil
         }.getInstance();
 
         assertNotNull("return value", KinesisUtil.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AFTER_SEQUENCE_NUMBER, "123", NOW, 1000L));
+
+        logCapture.assertLogSize(0);
     }
 
 
@@ -991,11 +1030,13 @@ public class TestKinesisUtil
         }.getInstance();
 
         assertNotNull("return value", KinesisUtil.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AT_TIMESTAMP, "123", NOW, 1000L));
+
+        logCapture.assertLogSize(0);
     }
 
 
     @Test
-    public void testRetrieveShardIteratorThrottling() throws Exception
+    public void testRetrieveShardIteratorTimeout() throws Exception
     {
         AmazonKinesis client = new SelfMock<AmazonKinesis>(AmazonKinesis.class)
         {
@@ -1010,6 +1051,9 @@ public class TestKinesisUtil
         assertNull("return value", KinesisUtil.retrieveShardIterator(client, STREAM_NAME, "shard-0001", ShardIteratorType.AT_TIMESTAMP, "123", NOW, 250L));
         long elapsed = System.currentTimeMillis() - start;
         assertApproximate("elapsed time", 300, elapsed, 10);
+
+        logCapture.assertLogSize(1);
+        logCapture.assertLogEntry(0, Level.WARN, "retrieveShardIterator timeout.* " + STREAM_NAME + " .* shard-0001");
     }
 
 
@@ -1033,6 +1077,8 @@ public class TestKinesisUtil
         assertEquals("parent map size", 2, shardsByParent.size());
         assertEquals("ultimate parents",  Arrays.asList(shard1, shard2), shardsByParent.get(null));
         assertEquals("expected children", Arrays.asList(shard3, shard4), shardsByParent.get(shard1.getShardId()));
+
+        logCapture.assertLogSize(0);
     }
 
 }

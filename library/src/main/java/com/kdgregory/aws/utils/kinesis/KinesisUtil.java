@@ -31,9 +31,12 @@ import com.kdgregory.aws.utils.CommonUtils;
 
 
 /**
- *  General utility methods for Kinesis. These methods perform retries with
+ *  General utility functions for Kinesis. These methods perform retries with
  *  exponential backoff when throttled, and handle the case where AWS requires
  *  multiple calls to retrieve all information.
+ *  <p>
+ *  Functions will log warning-level messages on timeout, debug-level messages
+ *  when creating or deleting resources.
  */
 public class KinesisUtil
 {
@@ -95,7 +98,7 @@ public class KinesisUtil
             }
         }
 
-        logger.warn("describeStream: timeout, stream = " + request.getStreamName());
+        logger.warn("describeStream timeout: " + request.getStreamName());
         return null;
     }
 
@@ -169,7 +172,7 @@ public class KinesisUtil
             CommonUtils.sleepQuietly(100);
         }
 
-        logger.warn("waitForStatus: timeout, stream = " + streamName);
+        logger.warn("waitForStatus timeout: " + streamName);
         return lastStatus;
     }
 
@@ -191,6 +194,8 @@ public class KinesisUtil
      */
     public static StreamStatus createStream(AmazonKinesis client, String streamName, int numShards, long timeout)
     {
+        logger.debug("createStream: " + streamName + ", with " + numShards + " shards");
+
         long currentSleep = 100;
         long abortAt = System.currentTimeMillis() + timeout;
         while (System.currentTimeMillis() < abortAt)
@@ -212,6 +217,7 @@ public class KinesisUtil
             {
                 // the documentation isn't very clear on this exception; it's thrown when
                 // the stream already exists
+                logger.warn("createStream called with existing stream: " + streamName);
                 break;
             }
         }
@@ -235,6 +241,8 @@ public class KinesisUtil
      */
     public static boolean deleteStream(AmazonKinesis client, String streamName, long timeout)
     {
+        logger.debug("deleteStream: " + streamName);
+
         long timeoutAt = System.currentTimeMillis() + timeout;
         long currentSleep = 100;
         while (System.currentTimeMillis() < timeoutAt)
@@ -251,11 +259,12 @@ public class KinesisUtil
             }
             catch (ResourceNotFoundException ex)
             {
+                logger.warn("deleteStream called for nonexistent stream: " + streamName);
                 return false;
             }
         }
 
-        logger.warn("deleteStream: timeout, stream = " + streamName);
+        logger.warn("deleteStream timeout: " + streamName);
         return false;
     }
 
@@ -283,6 +292,8 @@ public class KinesisUtil
      */
     public static StreamStatus updateRetentionPeriod(AmazonKinesis client, String streamName, int retention, long timeout)
     {
+        logger.debug("updateRetentionPeriod: " + streamName + " to " + retention + " hours");
+
         long timeoutAt = System.currentTimeMillis() + timeout;
 
         // this is certainly not the most efficient way to do things, but the code is simple
@@ -351,6 +362,7 @@ public class KinesisUtil
             catch (ResourceNotFoundException ex)
             {
                 // stream doesn't exist so no point in trying to do anything more
+                logger.warn("updateRetentionPeriod called for nonexistent stream: " + streamName);
                 return null;
             }
 
@@ -360,6 +372,7 @@ public class KinesisUtil
 
         return waitForStatus(client, streamName, StreamStatus.ACTIVE, (timeoutAt - System.currentTimeMillis()));
     }
+
 
     /**
      *  Changes the number of shards in a stream, waits for it to become active again,
@@ -393,27 +406,23 @@ public class KinesisUtil
     public static StreamStatus reshard(
         AmazonKinesis client, String streamName, int numberOfShards, long timeout)
     {
-        long timeoutAt = System.currentTimeMillis() + timeout;
+        logger.debug("reshard: " + streamName + " to " + numberOfShards + " shards");
 
-        if (logger.isDebugEnabled())
-        {
-            logger.debug("reshard: streamName = " + streamName + ", numberOfShards = " + numberOfShards);
-        }
+        long timeoutAt = System.currentTimeMillis() + timeout;
 
         client.updateShardCount(new UpdateShardCountRequest()
                                 .withStreamName(streamName)
                                 .withTargetShardCount(numberOfShards)
                                 .withScalingType(ScalingType.UNIFORM_SCALING));
-        if (logger.isDebugEnabled())
-        {
-            logger.debug("reshard: waiting for completion; streamName = " + streamName);
-        }
 
         while (System.currentTimeMillis() < timeoutAt)
         {
             StreamStatus lastStatus = KinesisUtil.waitForStatus(client, streamName, StreamStatus.ACTIVE, timeoutAt - System.currentTimeMillis());
             if (lastStatus == null)
                 break;
+
+            if (lastStatus == StreamStatus.UPDATING)
+                continue;
 
             List<Shard> shards = KinesisUtil.describeShards(client, streamName, timeoutAt - System.currentTimeMillis());
             if (shards == null)
@@ -432,7 +441,7 @@ public class KinesisUtil
                 return StreamStatus.ACTIVE;
         }
 
-        logger.warn("reshard: timed out waiting for stream to stabilize; streamName = " + streamName);
+        logger.warn("reshard timeout waiting for stream to stabilize: " + streamName);
         return null;
     }
 
@@ -497,7 +506,7 @@ public class KinesisUtil
             }
         }
 
-        logger.warn("retrieveShardIterator: timeout, stream = " + streamName + ", shard = " + shardId);
+        logger.warn("retrieveShardIterator timeout: " + streamName + " shard " + shardId);
         return null;
     }
 
