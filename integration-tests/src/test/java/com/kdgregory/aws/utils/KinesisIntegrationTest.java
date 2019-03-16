@@ -50,7 +50,7 @@ import com.kdgregory.aws.utils.kinesis.KinesisWriter;
  *  <p>
  *  Note: does not clean up after exceptions.
  */
-public class TestKinesis
+public class KinesisIntegrationTest
 {
     private Log logger = LogFactory.getLog(getClass());
 
