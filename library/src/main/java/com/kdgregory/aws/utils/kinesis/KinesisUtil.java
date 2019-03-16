@@ -66,10 +66,30 @@ public class KinesisUtil
 
 
     /**
-     *  Executes a <code>DescribeStream</code> request, returning the stream
-     *  description from the response. Will return null if the stream does not
-     *  exist, cannot be read within the specified timeout, or if the thread
-     *  is interrupted.
+     *  Executes a single <code>DescribeStream</code> request, returning the stream
+     *  description from the response. Will return null if the stream does not exist,
+     *  cannot be read within the specified timeout, or if the thread is interrupted.
+     *
+     *  @param  client          The AWS client used to make requests.
+     *  @param  request         The request that's passed to the client.
+     *  @param  timeout         The total number of milliseconds to attempt retries
+     *                          due to throttling. The initial retry is 100 millis,
+     *                          and this doubles for each retry.
+     */
+    public static StreamDescription describeStream(AmazonKinesis client, String streamName, long timeout)
+    {
+        return describeStream(client, new DescribeStreamRequest().withStreamName(streamName), timeout);
+    }
+
+
+    /**
+     *  Executes a single <code>DescribeStream</code> request, returning the stream
+     *  description from the response. Will return null if the stream does not exist,
+     *  cannot be read within the specified timeout, or if the thread is interrupted.
+     *  <p>
+     *  This variant is primarily for internal use, to handle paginated shard lists.
+     *  If you're interested in other parts of the description, such as stream status,
+     *  it's easier to call the variant that takes a stream name.
      *
      *  @param  client          The AWS client used to make requests.
      *  @param  request         The request that's passed to the client.
@@ -156,12 +176,11 @@ public class KinesisUtil
     {
         StreamStatus lastStatus = null;
         long timeoutAt = System.currentTimeMillis() + timeout;
-        DescribeStreamRequest request = new DescribeStreamRequest().withStreamName(streamName);
 
         while (System.currentTimeMillis() < timeoutAt)
         {
             long remainingTimeout = timeoutAt - System.currentTimeMillis();
-            StreamDescription description = describeStream(client, request, remainingTimeout);
+            StreamDescription description = describeStream(client, streamName, remainingTimeout);
             lastStatus = getStatus(description);
             if (lastStatus == desiredStatus)
             {
