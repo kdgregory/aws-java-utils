@@ -19,14 +19,18 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import org.junit.After;
-import org.junit.Before;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+
+import org.slf4j.MDC;
 
 import net.sf.kdgcommons.collections.CollectionUtil;
 import net.sf.kdgcommons.lang.StringUtil;
@@ -54,32 +58,64 @@ public class KinesisIntegrationTest
 {
     private Log logger = LogFactory.getLog(getClass());
 
-    private AmazonKinesis client;
+    // single client will be shared between all tests
+    private static AmazonKinesis client;
 
     private String streamName;
 
-
 //----------------------------------------------------------------------------
-//  Common setup/teardown
+//  Setup/teardown
 //----------------------------------------------------------------------------
 
-    @Before
-    public void setUp() throws Exception
+    @BeforeClass
+    public static void beforeClass() throws Exception
     {
         client = AmazonKinesisClientBuilder.defaultClient();
     }
 
 
+    @AfterClass
+    public static void afterClass() throws Exception
+    {
+        client.shutdown();
+    }
+    
+    
+    /**
+     *  Per-test initialization. Since each test is named, this isn't a @Setup
+     *  method. Pass non-zero numShards to create the stream.
+     */
+    private void init(String testName, int numShards)
+    {
+        streamName = "KinesisIntegrationTest-" + testName + "-" + UUID.randomUUID().toString();
+
+        MDC.put("testName", testName);
+        logger.info("starting. stream name is " + streamName);
+        
+        if (numShards > 0)
+        {
+            KinesisUtil.createStream(client, streamName, numShards, 30000);
+        }
+    }
+    
+    
     @After
     public void tearDown() throws Exception
     {
-        // nothing here (yet)
-    }
+        if (KinesisUtil.describeStream(client, streamName, 1000) != null)
+        {
+            KinesisUtil.deleteStream(client, streamName, 1000);
+            // we don't bother waiting, so check your streams afterward!
+        }
 
+        logger.info("finished");
+        MDC.clear();
+    }
+    
 //----------------------------------------------------------------------------
 //  Helpers
 //----------------------------------------------------------------------------
-
+    
     /**
      *  Writes a set of messages to the stream. Assumes that all messages can
      *  be sent in a single batch.
@@ -96,6 +132,7 @@ public class KinesisIntegrationTest
         writer.sendAll(2000);
     }
 
+    
     /**
      *  Reads up to an expected number of messages from the stream, using the
      *  specified writer (which may have been used before), timing out after
@@ -165,54 +202,61 @@ public class KinesisIntegrationTest
         assertEquals(baseMessage + ": message contents", expectedMessages, messages);
     }
 
-
 //----------------------------------------------------------------------------
 //  Testcases
 //----------------------------------------------------------------------------
 
     @Test
-    public void testBasicOperation() throws Exception
+    public void testCreateDescribeDestroy() throws Exception
     {
-        logger.info("testBasicOperation");
+        init("testCreateDescribeDestroy", 0);
 
-        streamName = "TestKinesis-testBasicOperation-1123";
+        logger.info("creating stream");
+        KinesisUtil.createStream(client, streamName, 2, 60000);
 
-        logger.debug("testBasicOperation: creating stream");
-        KinesisUtil.createStream(client, streamName, 1, 30000);
+        DescribeStreamRequest describeRequest = new DescribeStreamRequest().withStreamName(streamName);
+        StreamDescription streamDesc = KinesisUtil.describeStream(client, describeRequest, 2000);
+        assertEquals("stream status after creation", StreamStatus.ACTIVE, KinesisUtil.getStatus(streamDesc));
+        
+        logger.info("retrieving shards");
+        List<Shard> shards = KinesisUtil.describeShards(client, streamName, 20000);
+        assertEquals("returned expected number of shards", 2, shards.size());
+
+        logger.info("deleting stream");
+        KinesisUtil.deleteStream(client, streamName, 1000);
+        assertNull("stream status after deletion", KinesisUtil.waitForStatus(client, streamName, null, 60000));
+    }
+    
+    
+    @Test
+    public void testBasicWritingAndReading() throws Exception
+    {
+        init("testBasicWritingAndReading", 1);
 
         DescribeStreamRequest describeRequest = new DescribeStreamRequest().withStreamName(streamName);
         StreamDescription streamDesc = KinesisUtil.describeStream(client, describeRequest, 2000);
         assertEquals("stream status after creation", StreamStatus.ACTIVE, KinesisUtil.getStatus(streamDesc));
 
-        logger.debug("testBasicOperation: writing messages in several batches");
+        logger.info("writing messages");
         writeMessages("foo", "bar", 10);
         writeMessages("foo", "baz", 10);
         writeMessages("foo", "bar", 10);
         writeMessages("foo", "baz", 10);
 
-        logger.debug("testBasicOperation: reading all messages");
+        logger.info("reading messages");
         KinesisReader reader = new KinesisReader(client, streamName).readFromTrimHorizon();
         List<Record> records = readMessages(reader, 41);    // this should time-out but read all messages
 
         assertRecords("all messages", records, 40, 1, 1, CollectionUtil.asSet("bar", "baz"));
-
-        logger.debug("testBasicOperation: deleting stream");
-        KinesisUtil.deleteStream(client, streamName, 1000);
-        assertNull("stream was deleted", KinesisUtil.waitForStatus(client, streamName, null, 300000));
     }
 
 
     @Test
     public void testIncreaseShardCount() throws Exception
     {
-        logger.info("testIncreaseShardCount");
+        init("testIncreaseShardCount", 2);
 
-        streamName = "TestKinesis-testIncreaseShardCount-1123";
-
-        logger.debug("testIncreaseShardCount: creating stream");
-        KinesisUtil.createStream(client, streamName, 2, 60000);
-
-        logger.debug("testIncreaseShardCount: writing and reading initial batches of messages");
+        logger.info("writing and reading initial batches of messages");
         writeMessages(null, "init 1", 10);
         writeMessages(null, "init 2", 10);
         writeMessages(null, "init 3", 10);
@@ -224,11 +268,11 @@ public class KinesisIntegrationTest
 
         Map<String,String> savedSequenceNumbers = reader.getCurrentSequenceNumbers();
 
-        logger.debug("testIncreaseShardCount: resharding stream");
-        StreamStatus reshardStatus = KinesisUtil.reshard(client, streamName, 3, 300000);
+        logger.info("resharding stream");
+        StreamStatus reshardStatus = KinesisUtil.reshard(client, streamName, 3, 300 * 1000);
         assertEquals("reshard successful", StreamStatus.ACTIVE, reshardStatus);
 
-        logger.debug("testIncreaseShardCount: writing and reading final batches of messages");
+        logger.info("writing and reading final batches of messages");
         writeMessages(null, "final 1", 10);
         writeMessages(null, "final 2", 10);
         writeMessages(null, "final 3", 10);
@@ -236,35 +280,26 @@ public class KinesisIntegrationTest
         List<Record> finalBatch = readMessages(reader, 30);
         assertRecords("final batch", finalBatch, 30, 28, 30, CollectionUtil.asSet("final 1", "final 2", "final 3"));
 
-        logger.debug("testIncreaseShardCount: second reader, from saved sequence numbers");
+        logger.info("second reader, from saved sequence numbers");
         KinesisReader reader2 = new KinesisReader(client, streamName).withInitialSequenceNumbers(savedSequenceNumbers);
         assertRecords("secondreader", readMessages(reader2, 60),
                       30, 28, 30,
                       CollectionUtil.asSet("final 1", "final 2", "final 3"));
 
-        logger.debug("testIncreaseShardCount: third reader, reading entire stream");
+        logger.info("third reader, reading entire stream");
         KinesisReader reader3 = new KinesisReader(client, streamName).readFromTrimHorizon();
         assertRecords("third reader", readMessages(reader3, 60),
                       60, 56, 60,
                       CollectionUtil.asSet("init 1", "init 2", "init 3", "final 1", "final 2", "final 3"));
-
-        logger.debug("testIncreaseShardCount: deleting stream");
-        KinesisUtil.deleteStream(client, streamName, 1000);
-        assertNull("stream was deleted", KinesisUtil.waitForStatus(client, streamName, null, 300000));
     }
 
 
     @Test
     public void testDecreaseShardCount() throws Exception
     {
-        logger.info("testDecreaseShardCount");
+        init("testDecreaseShardCount", 3);
 
-        streamName = "TestKinesis-testDecreaseShardCount-1123";
-
-        logger.debug("testDecreaseShardCount: creating stream");
-        KinesisUtil.createStream(client, streamName, 3, 60000);
-
-        logger.debug("testDecreaseShardCount: writing and reading initial batches of messages");
+        logger.info("writing and reading initial batches of messages");
         writeMessages(null, "init 1", 10);
         writeMessages(null, "init 2", 10);
         writeMessages(null, "init 3", 10);
@@ -276,11 +311,11 @@ public class KinesisIntegrationTest
 
         Map<String,String> savedSequenceNumbers = reader.getCurrentSequenceNumbers();
 
-        logger.debug("testDecreaseShardCount: resharding stream");
+        logger.info("resharding stream");
         StreamStatus reshardStatus = KinesisUtil.reshard(client, streamName, 2, 300000);
         assertEquals("reshard successful", StreamStatus.ACTIVE, reshardStatus);
 
-        logger.debug("testDecreaseShardCount: writing and reading final batches of messages");
+        logger.info("writing and reading final batches of messages");
         writeMessages(null, "final 1", 10);
         writeMessages(null, "final 2", 10);
         writeMessages(null, "final 3", 10);
@@ -288,37 +323,28 @@ public class KinesisIntegrationTest
         List<Record> finalBatch = readMessages(reader, 30);
         assertRecords("final batch", finalBatch, 30, 28, 30, CollectionUtil.asSet("final 1", "final 2", "final 3"));
 
-        logger.debug("testDecreaseShardCount: second reader, from saved sequence numbers");
+        logger.info("second reader, from saved sequence numbers");
         KinesisReader reader2 = new KinesisReader(client, streamName).withInitialSequenceNumbers(savedSequenceNumbers);
         assertRecords("secondreader", readMessages(reader2, 60),
                       30, 28, 30,
                       CollectionUtil.asSet("final 1", "final 2", "final 3"));
 
-        logger.debug("testDecreaseShardCount: third reader, reading entire stream");
+        logger.info("third reader, reading entire stream");
         KinesisReader reader3 = new KinesisReader(client, streamName).readFromTrimHorizon();
         assertRecords("third reader", readMessages(reader3, 60),
                       60, 56, 60,
                       CollectionUtil.asSet("init 1", "init 2", "init 3", "final 1", "final 2", "final 3"));
-
-        logger.debug("testDecreaseShardCount: deleting stream");
-        KinesisUtil.deleteStream(client, streamName, 1000);
-        assertNull("stream was deleted", KinesisUtil.waitForStatus(client, streamName, null, 300000));
     }
 
 
     @Test
     public void testLargeRecords() throws Exception
     {
-        logger.info("testLargeRecords");
-
-        streamName = "TestKinesis-testLargeRecords-1123";
-
-        logger.debug("testLargeRecords: creating stream");
-        KinesisUtil.createStream(client, streamName, 1, 30000);
+        init("testLargeRecords", 1);
 
         KinesisWriter writer = new KinesisWriter(client, streamName);
 
-        logger.debug("testLargeRecords: writing messages");
+        logger.info("writing messages");
 
         String messageBase = StringUtil.repeat('A', 1024 * 1024);
         assertTrue(writer.addRecord(messageBase.substring(0,  1), messageBase.substring(1)));
@@ -333,7 +359,7 @@ public class KinesisIntegrationTest
         writer.sendAll(10000);
         assertEquals("was able to send all records", 0, writer.getUnsentRecords().size());
 
-        logger.debug("testLargeRecords: reading all messages");
+        logger.info("reading all messages");
         KinesisReader reader = new KinesisReader(client, streamName).readFromTrimHorizon();
         List<Record> records = readMessages(reader, 5);
 
@@ -344,9 +370,5 @@ public class KinesisIntegrationTest
         assertEquals("retrieved entire message + partition key",
                      messageBase,
                      records.get(4).getPartitionKey() + recordsAsText.get(4));
-
-        logger.debug("testLargeRecords: deleting stream");
-        KinesisUtil.deleteStream(client, streamName, 1000);
-        assertNull("stream was deleted", KinesisUtil.waitForStatus(client, streamName, null, 300000));
     }
 }

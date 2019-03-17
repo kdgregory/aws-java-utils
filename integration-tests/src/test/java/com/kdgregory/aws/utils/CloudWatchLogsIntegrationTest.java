@@ -36,7 +36,6 @@ import com.amazonaws.services.logs.model.*;
 import com.kdgregory.aws.utils.logs.CloudWatchLogsReader;
 import com.kdgregory.aws.utils.logs.CloudWatchLogsUtil;
 import com.kdgregory.aws.utils.logs.CloudWatchLogsWriter;
-import com.kdgregory.aws.utils.logs.CloudWatchLogsReader.StreamIdentifier;
 
 
 /**
