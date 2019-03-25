@@ -27,8 +27,25 @@ import com.kdgregory.aws.utils.cloudwatch.MetricReporter;
 
 
 /**
- *  Demonstrates the use of the metric reporter. Note that you will be charged
- *  for each dimension.
+ *  Demonstrates usage of the metric reporter in background mode, by setting
+ *  multiple threads on a "random walk": each thread manages a value, which
+ *  starts at 50, and is incremented or decremented each second. If the value
+ *  goes above 100 or below 0, it is capped at that number. The value is also
+ *  logged at each step, normally with DEBUG, but with WARN as it approaches
+ *  the limit, and with ERROR if it exceeds the limit.
+ *  <p>
+ *  Invoke with the number of threads to run.
+ *  <p>
+ *  This program's package name will be used as the metric's namespace, and
+ *  its classname will be used as the name of the metric. Each thread will
+ *  be reported as a separate dimension, and if running on EC2 the instance
+ *  ID will also be reported as a dimension. 
+ *  <p>
+ *  WARNING: this example creates custom metrics, which are charged at $0.30
+ *  each after the first 10 per month. It also incurs costs for the number of
+ *  reports, and for using high-resolution metrics.
+ * 
+ *  YOU ARE RESPONSIBLE FOR THESE CHARGES.
  */
 public class MetricReporterExample
 {
