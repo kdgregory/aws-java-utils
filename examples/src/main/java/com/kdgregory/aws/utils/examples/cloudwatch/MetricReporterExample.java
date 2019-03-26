@@ -17,6 +17,11 @@ package com.kdgregory.aws.utils.examples.cloudwatch;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import net.sf.kdgcommons.lang.ThreadUtil;
 
@@ -39,48 +44,104 @@ import com.kdgregory.aws.utils.cloudwatch.MetricReporter;
  *  This program's package name will be used as the metric's namespace, and
  *  its classname will be used as the name of the metric. Each thread will
  *  be reported as a separate dimension, and if running on EC2 the instance
- *  ID will also be reported as a dimension. 
+ *  ID will also be reported as a dimension.
  *  <p>
  *  WARNING: this example creates custom metrics, which are charged at $0.30
  *  each after the first 10 per month. It also incurs costs for the number of
  *  reports, and for using high-resolution metrics.
- * 
+ *
  *  YOU ARE RESPONSIBLE FOR THESE CHARGES.
  */
 public class MetricReporterExample
 {
+    private static Logger logger = LoggerFactory.getLogger(MetricReporterExample.class);
+
+
     public static void main(String[] argv)
     throws Exception
     {
+        int numThreads = (argv.length == 1)
+                       ? Integer.parseInt(argv[0])
+                       : 1;
+
         final AmazonCloudWatch client = AmazonCloudWatchClientBuilder.defaultClient();
-        final MetricReporter reporter = new MetricReporter(client, "com.kdgregory.aws.utils.examples.cloudwatch")
-                                        .withDimension("environment", "example");
+        final ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
+        final String namespace = MetricReporterExample.class.getPackage().getName();
+        final String metricName = MetricReporterExample.class.getName();
 
-        for (int ii = 0 ; ii< 2 ; ii++)
+        // note: we schedule the executor to run every second, even though we only write
+        //       metrics every 10 seconds; if there aren't any metrics queued it will do
+        //       nothing, and the short interval guarantees that metrics will be written
+        //       soon after thery're generated
+
+        final MetricReporter reporter = new MetricReporter(client, namespace, executor, 1000)
+                                        .withHighResolution(true);
+
+        for (int ii = 0 ; ii < numThreads ; ii++)
         {
-            new Thread(new Runnable()
-            {
-                @Override
-                public void run()
-                {
-                    Map<String,String> threadDimensions = new HashMap<String,String>();
-                    threadDimensions.put("threadName", Thread.currentThread().getName());
-
-                    Random rnd = new Random(Thread.currentThread().getId());
-                    int value = 1000;
-
-                    while (true)
-                    {
-                        value += rnd.nextInt(101) - 50;
-                        System.out.println(Thread.currentThread().getName() + ": " + value);
-                        reporter.report("example", value, threadDimensions);
-                        ThreadUtil.sleepQuietly(10000L);
-                    }
-                }
-            }).start();
+            new Thread(new RandomWalk(ii, reporter, metricName)).start();
         }
 
-        System.out.println("main thread sleeping for 15 minutes");
-        Thread.sleep(15 * 60000);
+        logger.info("main thread sleeping forever");
+        Thread.sleep(Long.MAX_VALUE);
+    }
+
+
+    private static class RandomWalk
+    implements Runnable
+    {
+        private MetricReporter reporter;
+        private String metricName;
+        private Map<String,String> addedDimensions = new HashMap<String,String>();
+
+        private Random rnd;
+        private int value;
+
+        public RandomWalk(int threadNum, MetricReporter reporter, String metricName)
+        {
+            this.reporter = reporter;
+            this.metricName = metricName;
+//            addedDimensions.put("thread", Thread.currentThread().getName());
+
+            rnd = new Random(threadNum);
+            value = 50;
+        }
+
+        @Override
+        public void run()
+        {
+            while (true)
+            {
+                takeStep();
+                reporter.report(metricName, value, addedDimensions);
+                ThreadUtil.sleepQuietly(10000L);
+            }
+        }
+
+
+        private void takeStep()
+        {
+            int step = 2 - rnd.nextInt(5);
+            value += step;
+
+            if (value < 0)
+            {
+                logger.error("value is " + value + "; was reset to 0");
+                value = 0;
+            }
+            else if (value > 100)
+            {
+                logger.error("value is " + value + "; was reset to 100");
+                value = 100;
+            }
+            else if ((value <= 10) || (value >= 90))
+            {
+                logger.warn("value is " + value);
+            }
+            else
+            {
+                logger.debug("value is " + value);
+            }
+        }
     }
 }
