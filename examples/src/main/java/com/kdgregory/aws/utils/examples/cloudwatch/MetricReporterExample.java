@@ -23,10 +23,12 @@ import java.util.concurrent.ScheduledExecutorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.sf.kdgcommons.lang.StringUtil;
 import net.sf.kdgcommons.lang.ThreadUtil;
 
 import com.amazonaws.services.cloudwatch.AmazonCloudWatch;
 import com.amazonaws.services.cloudwatch.AmazonCloudWatchClientBuilder;
+import com.amazonaws.util.EC2MetadataUtils;
 
 import com.kdgregory.aws.utils.cloudwatch.MetricReporter;
 
@@ -77,6 +79,16 @@ public class MetricReporterExample
         final MetricReporter reporter = new MetricReporter(client, namespace, executor, 1000)
                                         .withHighResolution(true);
 
+        // this will take some time to execute if you're not running on EC2, so is
+        // commented-out for normal use; it also increases the cost of running, as
+        // each instance means a new metric
+
+        String instanceId = EC2MetadataUtils.getInstanceId();
+        if (! StringUtil.isEmpty(instanceId))
+        {
+            reporter.withDimension("instanceId", instanceId);
+        }
+
         for (int ii = 0 ; ii < numThreads ; ii++)
         {
             new Thread(new RandomWalk(ii, reporter, metricName)).start();
@@ -101,7 +113,11 @@ public class MetricReporterExample
         {
             this.reporter = reporter;
             this.metricName = metricName;
-//            addedDimensions.put("thread", Thread.currentThread().getName());
+
+            // warning: if you have a lot of threads, this will drive up the cost
+            // to run this example; you may want to delete or comment-out
+
+            addedDimensions.put("thread", Thread.currentThread().getName());
 
             rnd = new Random(threadNum);
             value = 50;
