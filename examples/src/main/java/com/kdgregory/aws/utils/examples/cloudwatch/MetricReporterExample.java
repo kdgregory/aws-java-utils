@@ -41,7 +41,7 @@ import com.kdgregory.aws.utils.cloudwatch.MetricReporter;
  *  logged at each step, normally with DEBUG, but with WARN as it approaches
  *  the limit, and with ERROR if it exceeds the limit.
  *  <p>
- *  Invoke with the number of threads to run.
+ *  Invocation: <code>MetricReporterExample [NUM_THREADS]</code>
  *  <p>
  *  This program's package name will be used as the metric's namespace, and
  *  its classname will be used as the name of the metric. Each thread will
@@ -79,9 +79,8 @@ public class MetricReporterExample
         final MetricReporter reporter = new MetricReporter(client, namespace, executor, 1000)
                                         .withHighResolution(true);
 
-        // this will take some time to execute if you're not running on EC2, so is
-        // commented-out for normal use; it also increases the cost of running, as
-        // each instance means a new metric
+        // this will increase startup time if you're not running on EC2; it also increases the
+        // cost of running, as each instance results in a new metric
 
         String instanceId = EC2MetadataUtils.getInstanceId();
         if (! StringUtil.isEmpty(instanceId))
@@ -114,11 +113,6 @@ public class MetricReporterExample
             this.reporter = reporter;
             this.metricName = metricName;
 
-            // warning: if you have a lot of threads, this will drive up the cost
-            // to run this example; you may want to delete or comment-out
-
-            addedDimensions.put("thread", Thread.currentThread().getName());
-
             rnd = new Random(threadNum);
             value = 50;
         }
@@ -126,6 +120,11 @@ public class MetricReporterExample
         @Override
         public void run()
         {
+            // must set this dimension from the running thread, not the ctor
+            // BEWARE: each thread is a separate metric, charged at $0.30
+
+            addedDimensions.put("thread", Thread.currentThread().getName());
+
             while (true)
             {
                 takeStep();
