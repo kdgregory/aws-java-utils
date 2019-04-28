@@ -14,8 +14,12 @@
 
 package com.kdgregory.aws.utils.s3;
 
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
@@ -33,9 +37,13 @@ import com.amazonaws.services.s3.model.ObjectListing;
 public class ObjectListIterable
 implements Iterable<S3ObjectSummary>
 {
+    private Log logger = LogFactory.getLog(getClass());
+
     private AmazonS3 client;
     private String bucket;
     private String prefix;
+
+    private boolean isLoggingEnabled;
 
 
     /**
@@ -71,8 +79,50 @@ implements Iterable<S3ObjectSummary>
     }
 
 //----------------------------------------------------------------------------
+//  Configuration
+//----------------------------------------------------------------------------
+
+    /**
+     *  Enables/disables debug-level logging of AWS requests. Log messages are
+     *  emitted before and after retrieving batches of object listings, showing
+     *  bucket/prefix name in S3 URL format, and (for post-retrieve messages)
+     *  the number of list items retrieved.
+     */
+    public ObjectListIterable withDebugLogging(boolean enabled)
+    {
+        isLoggingEnabled = enabled;
+        return this;
+    }
+
+//----------------------------------------------------------------------------
 //  Internals
 //----------------------------------------------------------------------------
+
+    private void logRetrieveInitiation(String batchType)
+    {
+        if (! isLoggingEnabled)
+            return;
+
+        if (prefix == null)
+            logger.debug("retrieving " + batchType + " batch from s3://" + bucket);
+        if (prefix != null)
+            logger.debug("retrieving " + batchType + " batch from s3://" + bucket + "/" + prefix + "*");
+    }
+
+
+    private void logRetrieveCompletion(Collection<S3ObjectSummary> entries)
+    {
+        if (! isLoggingEnabled)
+            return;
+
+        int numEntries = (entries == null) ? 0 : entries.size();
+
+        if (prefix == null)
+            logger.debug("retrieved " + numEntries + " keys from s3://" + bucket);
+        if (prefix != null)
+            logger.debug("retrieved " + numEntries + " keys from s3://" + bucket + "/" + prefix + "*");
+    }
+
 
     private class ObjectListIterator
     implements Iterator<S3ObjectSummary>
@@ -85,9 +135,11 @@ implements Iterable<S3ObjectSummary>
         {
             if (currentBatch == null)
             {
+                logRetrieveInitiation("initial");
                 currentBatch = (prefix == null)
                              ? client.listObjects(bucket)
                              : client.listObjects(bucket, prefix);
+                logRetrieveCompletion(currentBatch.getObjectSummaries());
                 currentItx = currentBatch.getObjectSummaries().iterator();
             }
             else if (currentItx.hasNext())
@@ -96,7 +148,9 @@ implements Iterable<S3ObjectSummary>
             }
             else if (currentBatch.isTruncated())
             {
+                logRetrieveInitiation("subsequent");
                 currentBatch = client.listNextBatchOfObjects(currentBatch);
+                logRetrieveCompletion(currentBatch.getObjectSummaries());
                 currentItx = currentBatch.getObjectSummaries().iterator();
             }
 
