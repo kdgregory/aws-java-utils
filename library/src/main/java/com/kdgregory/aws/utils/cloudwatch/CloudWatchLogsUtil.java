@@ -29,7 +29,7 @@ import com.amazonaws.services.logs.model.*;
 public class CloudWatchLogsUtil
 {
     private static Log logger = LogFactory.getLog(CloudWatchLogsUtil.class);
-    
+
     /**
      *  The milliseconds to wait between describes when creating or deleting a resource.
      *  This is exposed for testing.
@@ -221,7 +221,7 @@ public class CloudWatchLogsUtil
 
 
     /**
-     *  Calls <code>AWSLogs.describeLogGroups()</code>, handling pagination.
+     *  Retrieves all log groups that match a given prefix, handling pagination.
      *
      *  @param  client          The service client.
      *  @param  prefix          The group name prefix. Pass null or an empty string
@@ -232,19 +232,10 @@ public class CloudWatchLogsUtil
     public static List<LogGroup> describeLogGroups(AWSLogs client, String prefix)
     {
         List<LogGroup> result = new ArrayList<LogGroup>();
-
-        DescribeLogGroupsRequest request = new DescribeLogGroupsRequest();
-        if ((prefix != null) && (prefix.length() > 0))
-            request.setLogGroupNamePrefix(prefix);
-
-        DescribeLogGroupsResult response = null;
-        do
+        for (LogGroup group : new LogGroupIterable(client, prefix))
         {
-            response = client.describeLogGroups(request);
-            result.addAll(response.getLogGroups());
-            request.setNextToken(response.getNextToken());
-        } while ((response.getNextToken() != null) && (response.getNextToken().length() > 0));
-
+            result.add(group);
+        }
         return result;
     }
 
