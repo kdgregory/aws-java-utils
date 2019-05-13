@@ -20,48 +20,49 @@ import java.util.NoSuchElementException;
 import com.amazonaws.services.logs.AWSLogs;
 import com.amazonaws.services.logs.model.*;
 
-
 /**
- *  Retrieves a listing of log groups, automatically handling pagination.
+ *  Retrieves a listing of log streams, automatically handling pagination.
  */
-public class LogGroupIterable
-implements Iterable<LogGroup>
+public class LogStreamIterable
+implements Iterable<LogStream>
 {
     private AWSLogs client;
+    private String logGroupName;
     private String prefix;
 
 
     /**
-     *  Iterates over log groups with a specified prefix.
+     *  Iterates over log streams with a specified prefix.
      */
-    public LogGroupIterable(AWSLogs client, String prefix)
+    public LogStreamIterable(AWSLogs client, String logGroupName, String prefix)
     {
         this.client = client;
+        this.logGroupName = logGroupName;
         this.prefix = prefix;
     }
 
 
     /**
-     *  Iterates over all log groups.
+     *  Iterates over all log streams for a named log group.
      */
-    public LogGroupIterable(AWSLogs client)
+    public LogStreamIterable(AWSLogs client, String logGroupName)
     {
-        this(client, null);
+        this(client, logGroupName, null);
     }
 
 
     @Override
-    public Iterator<LogGroup> iterator()
+    public Iterator<LogStream> iterator()
     {
-        return new LogGroupIterator();
+        return new LogStreamIterator();
     }
 
 
-    private class LogGroupIterator
-    implements Iterator<LogGroup>
+    private class LogStreamIterator
+    implements Iterator<LogStream>
     {
-        private DescribeLogGroupsResult currentBatch;
-        private Iterator<LogGroup> currentItx;
+        private DescribeLogStreamsResult currentBatch;
+        private Iterator<LogStream> currentItx;
 
         @Override
         public boolean hasNext()
@@ -72,22 +73,27 @@ implements Iterable<LogGroup>
             if ((currentBatch != null) && ((currentBatch.getNextToken() == null) || currentBatch.getNextToken().isEmpty()))
                 return false;
 
-            DescribeLogGroupsRequest request = new DescribeLogGroupsRequest();
-
+            DescribeLogStreamsRequest request = new DescribeLogStreamsRequest(logGroupName);
             if ((prefix != null) && !prefix.isEmpty())
-                request.setLogGroupNamePrefix(prefix);
+                request.setLogStreamNamePrefix(prefix);
 
             if (currentBatch != null)
                 request.setNextToken(currentBatch.getNextToken());
 
-            currentBatch = client.describeLogGroups(request);
-            currentItx = currentBatch.getLogGroups().iterator();
-
-            return currentItx.hasNext();
+            try
+            {
+                currentBatch = client.describeLogStreams(request);
+                currentItx = currentBatch.getLogStreams().iterator();
+                return currentItx.hasNext();
+            }
+            catch (ResourceNotFoundException ex)
+            {
+                return false;
+            }
         }
 
         @Override
-        public LogGroup next()
+        public LogStream next()
         {
             if (hasNext())
                 return currentItx.next();

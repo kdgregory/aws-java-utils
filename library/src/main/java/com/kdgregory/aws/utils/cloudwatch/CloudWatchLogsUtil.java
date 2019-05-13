@@ -241,17 +241,17 @@ public class CloudWatchLogsUtil
 
 
     /**
-     *  Calls <code>describeLogGroups()</code>, looking for a single group in the result.
+     *  Retrieves the description for a single log group.
      *
      *  @param  client          The service client.
      *  @param  groupName       The group name. Must not be null.
      *
-     *  @return The log group, <code>null</code> if a group with that exact name is does
+     *  @return The log group, <code>null</code> if a group with that exact name does
      *          not exist.
      */
     public static LogGroup describeLogGroup(AWSLogs client, String groupName)
     {
-        for (LogGroup group : describeLogGroups(client, groupName))
+        for (LogGroup group : new LogGroupIterable(client, groupName))
         {
             if (group.getLogGroupName().equals(groupName))
                 return group;
@@ -261,7 +261,8 @@ public class CloudWatchLogsUtil
 
 
     /**
-     *  Calls <code>AWSLogs.describeLogStreams()</code>, handling pagination.
+     *
+     *  Retrieves all log streams that match a given prefix, handling pagination.
      *
      *  @param  client          The service client.
      *  @param  groupName       The name of the log group containing the stream.
@@ -269,37 +270,21 @@ public class CloudWatchLogsUtil
      *                          to retrieve all strems in the group.
      *
      *  @return A list of the streams matching that prefix in the specified group.
-     *          If the group does not exist this will be empty.
+     *          Will be empty if the group does not exist.
      */
     public static List<LogStream> describeLogStreams(AWSLogs client, String groupName, String prefix)
     {
         List<LogStream> result = new ArrayList<LogStream>();
-
-        DescribeLogStreamsRequest request = new DescribeLogStreamsRequest(groupName);
-        if ((prefix != null) && (prefix.length() > 0))
-            request.setLogStreamNamePrefix(prefix);
-
-        try
+        for (LogStream stream : new LogStreamIterable(client, groupName, prefix))
         {
-            DescribeLogStreamsResult response = null;
-            do
-            {
-                response = client.describeLogStreams(request);
-                result.addAll(response.getLogStreams());
-                request.setNextToken(response.getNextToken());
-            } while ((response.getNextToken() != null) && (response.getNextToken().length() > 0));
+            result.add(stream);
         }
-        catch (ResourceNotFoundException ex)
-        {
-            // result will be empty, so just drop through
-        }
-
         return result;
     }
 
 
     /**
-     *  Calls <code>describeLogStreams()</code>, looking for a single group in the result.
+     *  Retrieves the description for a single log stream.
      *
      *  @param  client          The service client.
      *  @param  groupName       The name of the log group containing the stream.
@@ -310,7 +295,7 @@ public class CloudWatchLogsUtil
      */
     public static LogStream describeLogStream(AWSLogs client, String groupName, String streamName)
     {
-        for (LogStream stream : describeLogStreams(client, groupName, streamName))
+        for (LogStream stream : new LogStreamIterable(client, groupName, streamName))
         {
             if (stream.getLogStreamName().equals(streamName))
                 return stream;
