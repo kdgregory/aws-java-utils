@@ -191,7 +191,7 @@ public class KinesisUtil
             CommonUtils.sleepQuietly(100);
         }
 
-        logger.warn("waitForStatus timeout: " + streamName);
+        logger.debug("waitForStatus timeout: " + streamName);
         return lastStatus;
     }
 
