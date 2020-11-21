@@ -65,6 +65,42 @@ AWS SDK will result in a `NoSuchMethodError`. As long as you do not actually cal
 such functions, however, you will be able to build and run with earlier versions
 of the SDK.
 
+### commons-logging
+
+This library uses [Apache commons-logging](http://commons.apache.org/proper/commons-logging/)
+version 1.1.3, which is also a dependency of the AWS SDK. It is not designed to recognize
+that the commons-logging JAR is not available in the classpath (neither does the SDK), so
+if you don't like commons-logging you need to replace it (for example, with `jcl-over-slf4j`
+if you use the SLF4J logging framework). _Unlike_ the SDK, you don't have to explicitly
+ignore the transitive dependency.
+
+This library does a moderate amount of debug-level logging, along with extensive logging of
+error conditions. You probably don't want to see the former, but should enable the latter.
+To do so with Log4J 1.x, use the following in your `log4j.properties` (adapt as needed for
+other logging frameworks):
+
+```
+log4j.logger.com.kdgregory.aws.utils=ERROR
+```
+
+
+## Source Control
+
+The `master` branch is intended for "potentially releasable" versions that correspond to
+the current SDK minor release. Commits on master are functional, but may not be "complete"
+(for some definition of that word). They may be "snapshot" or release builds. Master will
+never be rebased; once a commit is made there it's part of history for better or worse.
+
+Previous AWS SDK versions, where supported, will have a long-lived `support-MAJOR` branch.
+New features will be backported to these branches.
+
+Development takes place on a `dev-MAJOR.MINOR.PATCH` branch; these branches are deleted
+once their content has been merged into `master`. *BEWARE*: these branches may be rebased
+as I see fit.
+
+Each "release" version is tagged with `release-MAJOR.MINOR.PATCH`, whether or not it was
+uploaded to Maven Central.
+=======
 The project produces classfiles compatible with Java 6, and does not use any features
 from later Java versions. However, it has not been tested with a Java 6 environment,
 and there is no guarantee that the AWS SDK will not rely on a later version.
@@ -137,3 +173,4 @@ while operations are queued, they will never complete. You can add a shutdown ho
 to guard against this case, but you can't guard against unexpected JVM termination.
 You will need to determine whether the trade-off between efficiency and certainty
 is appropriate for your application.
+>>>>>>> master
