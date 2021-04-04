@@ -65,24 +65,6 @@ AWS SDK will result in a `NoSuchMethodError`. As long as you do not actually cal
 such functions, however, you will be able to build and run with earlier versions
 of the SDK.
 
-### commons-logging
-
-This library uses [Apache commons-logging](http://commons.apache.org/proper/commons-logging/)
-version 1.1.3, which is also a dependency of the AWS SDK. It is not designed to recognize
-that the commons-logging JAR is not available in the classpath (neither does the SDK), so
-if you don't like commons-logging you need to replace it (for example, with `jcl-over-slf4j`
-if you use the SLF4J logging framework). _Unlike_ the SDK, you don't have to explicitly
-ignore the transitive dependency.
-
-This library does a moderate amount of debug-level logging, along with extensive logging of
-error conditions. You probably don't want to see the former, but should enable the latter.
-To do so with Log4J 1.x, use the following in your `log4j.properties` (adapt as needed for
-other logging frameworks):
-
-```
-log4j.logger.com.kdgregory.aws.utils=ERROR
-```
-
 
 ## Source Control
 
@@ -121,10 +103,10 @@ version 1.1.3, which is also a dependency of the AWS SDK. If you exlude the SDK'
 dependency and do not provide a replacement (such as `jcl-over-slf4j`), some operations will
 throw a `NoClassDefFoundError`.
 
-Operations use debug-level logging to report actions such as creating or deleting an AWS
+The library uses debug-level logging to report actions such as creating or deleting an AWS
 resource, and warn-level logging to report any unexpected conditions (such as a timeout
 expiring before a resource becomes ready). The library does not use info- or error-level
-logging, and does not log normal operations (such as writing batches of messages).
+logging.
 
 All log messages are reported using the class name as a logger name. Using a hierarchical
 logging framework such as Log4J, you can turn off all logging with the top-level package
