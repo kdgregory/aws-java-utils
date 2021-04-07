@@ -103,14 +103,16 @@ version 1.1.3, which is also a dependency of the AWS SDK. If you exlude the SDK'
 dependency and do not provide a replacement (such as `jcl-over-slf4j`), some operations will
 throw a `NoClassDefFoundError`.
 
-The library uses debug-level logging to report actions such as creating or deleting an AWS
-resource, and warn-level logging to report any unexpected conditions (such as a timeout
-expiring before a resource becomes ready). The library does not use info- or error-level
-logging.
+> Note: the tests for the main library have a dependency on Log4J 1.x, because some tests
+  look at logging output and it's easier to write an "interceptor" for that framework.
 
-All log messages are reported using the class name as a logger name. Using a hierarchical
-logging framework such as Log4J, you can turn off all logging with the top-level package
-name:
+Log messages use either DEBUG or WARN level: the former to report progress, and the latter
+for unexpected situations (such as a timeout expiring before a resource becomes ready). The
+library does not use info- or error-level logging (I believe that errors should be reserved
+for situations where someone needs to be woken up, and only you can decide that).
+
+Loggers are configured using the class name as logger name. With a hierarchical logging
+framework such as Log4J, you can turn off all logging with the top-level package name:
 
 ```
 log4j.logger.com.kdgregory.aws.utils=OFF
