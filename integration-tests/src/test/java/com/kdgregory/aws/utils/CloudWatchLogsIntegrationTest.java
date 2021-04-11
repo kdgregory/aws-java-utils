@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.kdgregory.aws.utils.cloudwatch;
+package com.kdgregory.aws.utils;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -36,6 +36,7 @@ import com.amazonaws.services.logs.model.*;
 import com.kdgregory.aws.utils.cloudwatch.CloudWatchLogsReader;
 import com.kdgregory.aws.utils.cloudwatch.CloudWatchLogsUtil;
 import com.kdgregory.aws.utils.cloudwatch.CloudWatchLogsWriter;
+import com.kdgregory.aws.utils.cloudwatch.CloudWatchLogsReader.StreamIdentifier;
 
 
 /**
