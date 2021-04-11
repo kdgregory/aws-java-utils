@@ -42,8 +42,15 @@
 
         <jdk.version>1.8</jdk.version>
 
-        <aws-sdk.version>1.11.500</aws-sdk.version>
+        <!--  this is the minimum SDK version we support -->
+        <aws-sdk.version>1.11.250</aws-sdk.version>
+
+        <!-- these are transitive dependencies of the SDK that are used by us directly -->
+        <!-- version is dependent on SDK version above -->
+        <jackson-core.version>2.6.7</jackson-core.version>
         <commons-logging.version>1.1.3</commons-logging.version>
+
+        <!-- everythign below here is used for tests -->
         <junit.version>4.13.1</junit.version>
         <kdgcommons.version>1.0.17</kdgcommons.version>
         <log4j.version>1.2.16</log4j.version>
@@ -56,10 +63,17 @@
 
 
     <dependencies>
-        
+
+        <!-- only includes the SDK libraries that we work with -->
         <dependency>
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-java-sdk-cloudwatch</artifactId>
+            <version>${aws-sdk.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-iam</artifactId>
             <version>${aws-sdk.version}</version>
             <scope>provided</scope>
         </dependency>
@@ -77,19 +91,33 @@
         </dependency>
         <dependency>
             <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-sts</artifactId>
+            <version>${aws-sdk.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.amazonaws</groupId>
             <artifactId>aws-java-sdk-s3</artifactId>
             <version>${aws-sdk.version}</version>
             <scope>provided</scope>
         </dependency>
 
+        <!-- these are provided as transitive dependencies of SDK but are used by us -->
         <dependency>
-            <!-- provided as a transitive dependency of the SDK or overridden by user -->
             <groupId>commons-logging</groupId>
             <artifactId>commons-logging</artifactId>
             <version>${commons-logging.version}</version>
             <scope>provided</scope>
         </dependency>
 
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>${jackson-core.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- everything below here is used for testing -->
         <dependency>
             <groupId>com.kdgregory.aws</groupId>
             <artifactId>aws-java-utils-testhelpers</artifactId>
