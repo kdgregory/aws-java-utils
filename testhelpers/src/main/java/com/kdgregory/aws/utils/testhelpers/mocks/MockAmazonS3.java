@@ -14,6 +14,9 @@
 
 package com.kdgregory.aws.utils.testhelpers.mocks;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -21,8 +24,11 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.UUID;
 
 import static org.junit.Assert.*;
+
+import net.sf.kdgcommons.io.IOUtil;
 
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.*;
@@ -49,11 +55,20 @@ extends AbstractMock<AmazonS3>
     // configuration values
     private int pageSize = Integer.MAX_VALUE;
 
-    // these variables track the most recent invocation arguments, across
-    // methods that perform similar operations
+    // these variables are used for assertions on similar methods (so that the
+    // caller doesn't have to dig into the invocations).
     private String lastListBucket;
     private String lastListPrefix;
     private String lastListMarker;
+
+    // these variables are used for internal assertions in multipart uploads
+    private String multipartBucket;
+    private String multipartKey;
+    private String uploadToken;
+    private List<PartETag> partTags = new ArrayList<>();
+
+    // exposes the buffers provided in a multipart upload
+    public List<byte[]> buffers = new ArrayList<>();
 
 
     public MockAmazonS3()
@@ -99,7 +114,6 @@ extends AbstractMock<AmazonS3>
         }
         return this;
     }
-
 //----------------------------------------------------------------------------
 //  Mock Implementations
 //----------------------------------------------------------------------------
@@ -119,6 +133,64 @@ extends AbstractMock<AmazonS3>
     public ObjectListing listNextBatchOfObjects(ObjectListing prevListing)
     {
         return internalListObjects(prevListing.getBucketName(), prevListing.getPrefix(), prevListing.getNextMarker());
+    }
+
+    public PutObjectResult putObject(String bucketName, String key, InputStream input, ObjectMetadata metadata)
+    {
+        extractBuffer(input);
+        // we don't look at the result, so no reason to return it
+        return new PutObjectResult();
+    }
+
+    public InitiateMultipartUploadResult initiateMultipartUpload(InitiateMultipartUploadRequest request)
+    {
+        multipartBucket = request.getBucketName();
+        multipartKey = request.getKey();
+        uploadToken = UUID.randomUUID().toString();  // just need something
+
+        InitiateMultipartUploadResult result = new InitiateMultipartUploadResult();
+        result.setUploadId(uploadToken);
+        return result;
+    }
+
+    public UploadPartResult uploadPart(UploadPartRequest request)
+    {
+        assertEquals("uploadPart specified bucket",         multipartBucket,    request.getBucketName());
+        assertEquals("uploadPart specified key",            multipartKey,       request.getKey());
+        assertEquals("uploadPart specified upload token",   uploadToken,        request.getUploadId());
+
+        extractBuffer(request.getInputStream());
+        PartETag partTag = new PartETag(request.getPartNumber(), UUID.randomUUID().toString());
+        partTags.add(partTag);
+
+        UploadPartResult result = new UploadPartResult();
+        result.setPartNumber(request.getPartNumber());
+        result.setETag(partTag.getETag());
+        return result;
+    }
+
+    public CompleteMultipartUploadResult completeMultipartUpload(CompleteMultipartUploadRequest request)
+    {
+        assertEquals("completeMultipartUpload specified bucket",        multipartBucket,    request.getBucketName());
+        assertEquals("completeMultipartUpload specified key",           multipartKey,       request.getKey());
+        assertEquals("completeMultipartUpload specified upload token",  uploadToken,        request.getUploadId());
+
+        // PartETag is does not support value-based equals, so we need to compare explicitly
+        assertEquals("completeMultipartUpload number of part tags",     partTags.size(),    request.getPartETags().size());
+        for (int ii = 0 ; ii < partTags.size() ; ii++)
+        {
+            assertEquals("completeMultipartUpload part tag " + ii + " partNumber",  partTags.get(ii).getPartNumber(),   request.getPartETags().get(ii).getPartNumber());
+            assertEquals("completeMultipartUpload part tag " + ii + " eTag",        partTags.get(ii).getETag(),         request.getPartETags().get(ii).getETag());
+        }
+
+        return new CompleteMultipartUploadResult();
+    }
+
+    public void abortMultipartUpload(AbortMultipartUploadRequest request)
+    {
+        assertEquals("abortMultipartUpload specified bucket",        multipartBucket,    request.getBucketName());
+        assertEquals("abortMultipartUpload specified key",           multipartKey,       request.getKey());
+        assertEquals("abortMultipartUpload specified upload token",  uploadToken,        request.getUploadId());
     }
 
 //----------------------------------------------------------------------------
@@ -275,6 +347,7 @@ extends AbstractMock<AmazonS3>
     /**
      *  Holds a bucket and all of its contents.
      */
+    @SuppressWarnings("unused")
     private static class MockS3Bucket
     {
         private String name;
@@ -343,6 +416,7 @@ extends AbstractMock<AmazonS3>
     /**
      *  Holds a representation of an object for internal use.
      */
+    @SuppressWarnings("unused")
     private static class MockS3Object
     {
         private static byte[] EMPTY_OBJECT = new byte[0];
@@ -415,6 +489,40 @@ extends AbstractMock<AmazonS3>
                           : objects.get(limit - 1).key;
 
         return new MockObjectListing(bucketName, prefix, objects.subList(0, limit), prevMarker, nextMarker);
+    }
+
+
+    /**
+     *  Extracts the contents from the InputStream provided to PutObject or
+     *  UploadPart and saves it for future reference.
+     */
+    private void extractBuffer(InputStream in)
+    {
+        try
+        {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            IOUtil.copy(in, bos);
+            buffers.add(bos.toByteArray());
+        }
+        catch (IOException ex)
+        {
+            throw new RuntimeException("internal exception in mock", ex);
+        }
+    }
+
+
+    /**
+     *  Combines all buffers from a multipart upload into a single byte array.
+     */
+    public byte[] recombineBuffers()
+    throws Exception
+    {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        for (byte[] buffer : buffers)
+        {
+            bos.write(buffer);
+        }
+        return bos.toByteArray();
     }
 
 }

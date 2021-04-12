@@ -15,27 +15,24 @@
 package com.kdgregory.aws.utils.s3;
 
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Random;
-import java.util.UUID;
 
 import org.junit.Test;
 import static org.junit.Assert.*;
 
-import net.sf.kdgcommons.io.IOUtil;
 import net.sf.kdgcommons.lang.ClassUtil;
-import net.sf.kdgcommons.test.SelfMock;
 
 import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.model.*;
+import com.amazonaws.services.s3.model.InitiateMultipartUploadRequest;
+import com.amazonaws.services.s3.model.ObjectMetadata;
+import com.amazonaws.services.s3.model.UploadPartRequest;
+
+import com.kdgregory.aws.utils.testhelpers.mocks.MockAmazonS3;
 
 
 public class TestS3OutputStream
 {
-    private S3Mock mock = new S3Mock();
+    private MockAmazonS3 mock = new MockAmazonS3();
     private AmazonS3 s3Client = mock.getInstance();
 
 //----------------------------------------------------------------------------
@@ -116,7 +113,7 @@ public class TestS3OutputStream
         assertEquals("buffer 1 size",               5 * 1024 * 1024,    mock.buffers.get(0).length);
         assertEquals("buffer 2 size",               5 * 1024 * 1024,    mock.buffers.get(1).length);
         assertEquals("buffer 3 size",               1 * 1024 * 1024,    mock.buffers.get(2).length);
-        
+
         assertEquals("part 1 reported size",        5 * 1024 * 1024,    mock.getInvocationArg("uploadPart", 0, 0, UploadPartRequest.class).getPartSize());
         assertEquals("part 2 reported size",        5 * 1024 * 1024,    mock.getInvocationArg("uploadPart", 1, 0, UploadPartRequest.class).getPartSize());
         assertEquals("part 3 reported size",        1 * 1024 * 1024,    mock.getInvocationArg("uploadPart", 2, 0, UploadPartRequest.class).getPartSize());
@@ -149,7 +146,7 @@ public class TestS3OutputStream
         assertEquals("buffer 0 size",               5 * 1024 * 1024,    mock.buffers.get(0).length);
         assertEquals("buffer 1 size",               5 * 1024 * 1024,    mock.buffers.get(1).length);
         assertEquals("buffer 2 size",               1 * 1024 * 1024,    mock.buffers.get(2).length);
-        
+
         assertEquals("part 1 reported size",        5 * 1024 * 1024,    mock.getInvocationArg("uploadPart", 0, 0, UploadPartRequest.class).getPartSize());
         assertEquals("part 2 reported size",        5 * 1024 * 1024,    mock.getInvocationArg("uploadPart", 1, 0, UploadPartRequest.class).getPartSize());
         assertEquals("part 3 reported size",        1 * 1024 * 1024,    mock.getInvocationArg("uploadPart", 2, 0, UploadPartRequest.class).getPartSize());
@@ -296,114 +293,5 @@ public class TestS3OutputStream
         byte[] data = new byte[length];
         (new Random()).nextBytes(data);
         return data;
-    }
-
-
-    @SuppressWarnings("unused")
-    private static class S3Mock
-    extends SelfMock<AmazonS3>
-    {
-        public S3Mock()
-        {
-            super(AmazonS3.class);
-        }
-
-        // internals -- these are used to assert locally
-
-        public String multipartBucket;
-        public String multipartKey;
-        private String uploadToken;
-        public List<PartETag> partTags = new ArrayList<>();
-
-        // recorded information separate from that recorded by SelfMock -- used for caller assertions
-
-        public List<byte[]> buffers = new ArrayList<>();
-
-        // helper functions
-
-        private void extractBuffer(InputStream in)
-        {
-            try
-            {
-                ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                IOUtil.copy(in, bos);
-                buffers.add(bos.toByteArray());
-            }
-            catch (IOException ex)
-            {
-                throw new RuntimeException("internal exception in mock", ex);
-            }
-        }
-
-        public byte[] recombineBuffers()
-        throws Exception
-        {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            for (byte[] buffer : buffers)
-            {
-                bos.write(buffer);
-            }
-            return bos.toByteArray();
-        }
-
-        // mock handlers follow
-
-        public PutObjectResult putObject(String bucketName, String key, InputStream input, ObjectMetadata metadata)
-        {
-            extractBuffer(input);
-            // we don't look at the result, so no reason to return it
-            return new PutObjectResult();
-        }
-
-        public InitiateMultipartUploadResult initiateMultipartUpload(InitiateMultipartUploadRequest request)
-        {
-            multipartBucket = request.getBucketName();
-            multipartKey = request.getKey();
-            uploadToken = UUID.randomUUID().toString();  // just need something
-
-            InitiateMultipartUploadResult result = new InitiateMultipartUploadResult();
-            result.setUploadId(uploadToken);
-            return result;
-        }
-
-        public UploadPartResult uploadPart(UploadPartRequest request)
-        {
-            assertEquals("uploadPart specified bucket",         multipartBucket,    request.getBucketName());
-            assertEquals("uploadPart specified key",            multipartKey,       request.getKey());
-            assertEquals("uploadPart specified upload token",   uploadToken,        request.getUploadId());
-
-            extractBuffer(request.getInputStream());
-            PartETag partTag = new PartETag(request.getPartNumber(), UUID.randomUUID().toString());
-            partTags.add(partTag);
-
-            UploadPartResult result = new UploadPartResult();
-            result.setPartNumber(request.getPartNumber());
-            result.setETag(partTag.getETag());
-            return result;
-        }
-
-        public CompleteMultipartUploadResult completeMultipartUpload(CompleteMultipartUploadRequest request)
-        {
-            assertEquals("completeMultipartUpload specified bucket",        multipartBucket,    request.getBucketName());
-            assertEquals("completeMultipartUpload specified key",           multipartKey,       request.getKey());
-            assertEquals("completeMultipartUpload specified upload token",  uploadToken,        request.getUploadId());
-
-            // PartETag is does not support value-based equals, so we need to compare explicitly
-            assertEquals("completeMultipartUpload number of part tags",     partTags.size(),    request.getPartETags().size());
-            for (int ii = 0 ; ii < partTags.size() ; ii++)
-            {
-                assertEquals("completeMultipartUpload part tag " + ii + " partNumber",  partTags.get(ii).getPartNumber(),   request.getPartETags().get(ii).getPartNumber());
-                assertEquals("completeMultipartUpload part tag " + ii + " eTag",        partTags.get(ii).getETag(),         request.getPartETags().get(ii).getETag());
-            }
-
-            return new CompleteMultipartUploadResult();
-        }
-
-        public void abortMultipartUpload(AbortMultipartUploadRequest request)
-        {
-            assertEquals("abortMultipartUpload specified bucket",        multipartBucket,    request.getBucketName());
-            assertEquals("abortMultipartUpload specified key",           multipartKey,       request.getKey());
-            assertEquals("abortMultipartUpload specified upload token",  uploadToken,        request.getUploadId());
-        }
     }
 }
