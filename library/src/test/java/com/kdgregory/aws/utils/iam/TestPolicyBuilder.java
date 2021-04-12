@@ -36,7 +36,6 @@ import com.kdgregory.aws.utils.iam.PolicyBuilder.Statement;
 public class TestPolicyBuilder
 {
 
-
 //----------------------------------------------------------------------------
 //  Testcases
 //

@@ -42,7 +42,7 @@ public class TestKinesisWriter
     private LinkedList<LoggingEvent> loggingEvents = new LinkedList<LoggingEvent>();
 
 //----------------------------------------------------------------------------
-//  Common setup
+//  Per-test boilerplate
 //----------------------------------------------------------------------------
 
     @Before
@@ -77,102 +77,6 @@ public class TestKinesisWriter
 //----------------------------------------------------------------------------
 
     public final static String STREAM_NAME = "TestKinesisWriter";
-
-//----------------------------------------------------------------------------
-//  Helpers
-//----------------------------------------------------------------------------
-
-    /**
-     *  Asserts that there's a logging message of a particular level that contains
-     *  the expected text (specified as a regex).
-     */
-    private void assertLogMessage(Level level, String expectedMessageRegex)
-    {
-        Pattern pattern = Pattern.compile(expectedMessageRegex);
-        for (LoggingEvent event : loggingEvents)
-        {
-            if ((event.getLevel() == level) && pattern.matcher(event.getRenderedMessage().toString()).find())
-                return;
-        }
-        fail("did not find \"" + expectedMessageRegex + "\" in logging events");
-    }
-
-
-    /**
-     *  A mock client that supports only <code>PutRecords</code>. By default,
-     *  the request is recorded and response is successful. Override
-     */
-    public static class KinesisMock extends SelfMock<AmazonKinesis>
-    {
-        private String expectedStreamName;
-
-        public List<PutRecordsRequest> recordsWritten = new ArrayList<PutRecordsRequest>();
-
-        public KinesisMock(String expectedStreamName)
-        {
-            super(AmazonKinesis.class);
-            this.expectedStreamName = expectedStreamName;
-        }
-
-        public PutRecordsResult putRecords(PutRecordsRequest request)
-        {
-            assertEquals("putRecords: stream name", expectedStreamName, request.getStreamName());
-
-            List<PutRecordsResultEntry> results = new ArrayList<PutRecordsResultEntry>();
-            int recordIndex = 0;
-            int failedRecordCount = 0;
-            for (PutRecordsRequestEntry requestEntry : request.getRecords())
-            {
-                PutRecordsResultEntry resultEntry = processRecord(requestEntry, recordIndex++);
-                results.add(resultEntry);
-                if (! StringUtil.isEmpty(resultEntry.getErrorCode()))
-                    failedRecordCount++;
-            }
-
-            return new PutRecordsResult()
-                   .withRecords(results)
-                   .withFailedRecordCount(failedRecordCount);
-        }
-
-        protected PutRecordsResultEntry processRecord(PutRecordsRequestEntry record, int index)
-        {
-            return new PutRecordsResultEntry()
-                   .withShardId("shard-0000")
-                   .withSequenceNumber("00000000");
-        }
-    }
-
-
-    /**
-     *  A variant of the mock that fails 1 out of N records.
-     */
-    public static class PartialThrottlingMock extends KinesisMock
-    {
-        private int failureMod;
-
-        public PartialThrottlingMock(String streamName, int failureMod)
-        {
-            super(streamName);
-            this.failureMod = failureMod;
-        }
-
-        @Override
-        protected PutRecordsResultEntry processRecord(PutRecordsRequestEntry record, int index)
-        {
-            // note: mod must not be 0 or we'll never end
-            if (index % failureMod == 1)
-            {
-                return new PutRecordsResultEntry()
-                       .withErrorCode("")
-                       .withErrorCode("ProvisionedThroughputExceededException");
-            }
-            else
-            {
-                return super.processRecord(record, index);
-            }
-        }
-    }
-
 
 //----------------------------------------------------------------------------
 //  Testcases
@@ -471,5 +375,100 @@ public class TestKinesisWriter
 
         assertEquals("result count",        14,     writer.getSendResults().size());
         assertEquals("unsent record count", 0,      writer.getUnsentRecords().size());
+    }
+
+//----------------------------------------------------------------------------
+//  Helpers
+//----------------------------------------------------------------------------
+
+    /**
+     *  Asserts that there's a logging message of a particular level that contains
+     *  the expected text (specified as a regex).
+     */
+    private void assertLogMessage(Level level, String expectedMessageRegex)
+    {
+        Pattern pattern = Pattern.compile(expectedMessageRegex);
+        for (LoggingEvent event : loggingEvents)
+        {
+            if ((event.getLevel() == level) && pattern.matcher(event.getRenderedMessage().toString()).find())
+                return;
+        }
+        fail("did not find \"" + expectedMessageRegex + "\" in logging events");
+    }
+
+
+    /**
+     *  A mock client that supports only <code>PutRecords</code>. By default,
+     *  the request is recorded and response is successful. Override
+     */
+    public static class KinesisMock extends SelfMock<AmazonKinesis>
+    {
+        private String expectedStreamName;
+
+        public List<PutRecordsRequest> recordsWritten = new ArrayList<PutRecordsRequest>();
+
+        public KinesisMock(String expectedStreamName)
+        {
+            super(AmazonKinesis.class);
+            this.expectedStreamName = expectedStreamName;
+        }
+
+        public PutRecordsResult putRecords(PutRecordsRequest request)
+        {
+            assertEquals("putRecords: stream name", expectedStreamName, request.getStreamName());
+
+            List<PutRecordsResultEntry> results = new ArrayList<PutRecordsResultEntry>();
+            int recordIndex = 0;
+            int failedRecordCount = 0;
+            for (PutRecordsRequestEntry requestEntry : request.getRecords())
+            {
+                PutRecordsResultEntry resultEntry = processRecord(requestEntry, recordIndex++);
+                results.add(resultEntry);
+                if (! StringUtil.isEmpty(resultEntry.getErrorCode()))
+                    failedRecordCount++;
+            }
+
+            return new PutRecordsResult()
+                   .withRecords(results)
+                   .withFailedRecordCount(failedRecordCount);
+        }
+
+        protected PutRecordsResultEntry processRecord(PutRecordsRequestEntry record, int index)
+        {
+            return new PutRecordsResultEntry()
+                   .withShardId("shard-0000")
+                   .withSequenceNumber("00000000");
+        }
+    }
+
+
+    /**
+     *  A variant of the mock that fails 1 out of N records.
+     */
+    public static class PartialThrottlingMock extends KinesisMock
+    {
+        private int failureMod;
+
+        public PartialThrottlingMock(String streamName, int failureMod)
+        {
+            super(streamName);
+            this.failureMod = failureMod;
+        }
+
+        @Override
+        protected PutRecordsResultEntry processRecord(PutRecordsRequestEntry record, int index)
+        {
+            // note: mod must not be 0 or we'll never end
+            if (index % failureMod == 1)
+            {
+                return new PutRecordsResultEntry()
+                       .withErrorCode("")
+                       .withErrorCode("ProvisionedThroughputExceededException");
+            }
+            else
+            {
+                return super.processRecord(record, index);
+            }
+        }
     }
 }

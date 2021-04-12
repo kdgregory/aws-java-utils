@@ -69,196 +69,6 @@ public class TestKinesisReader
     private final static List<String> RECORDS_3 = Arrays.asList("crunchy", "bits");
     private final static List<String> RECORDS_4 = Arrays.asList("norwegian", "blue");
 
-
-//----------------------------------------------------------------------------
-//  Helpers
-//----------------------------------------------------------------------------
-
-    private static String formatShardId(int id)
-    {
-        return String.format("shard-%03d", id);
-    }
-
-
-    private static String formatSequenceNumber(String shardId, int index)
-    {
-        return shardId + "," + String.format("%06d", index);
-    }
-
-
-    private static String extractShardIdFromSeqnum(String sequenceNumber)
-    {
-        return sequenceNumber.split(",")[0];
-    }
-
-
-    private static int extractOffsetFromSeqnum(String sequenceNumber)
-    {
-        return Integer.parseInt(sequenceNumber.split(",")[1]);
-    }
-
-
-    /**
-     *  Identifies all log messages that contain the specified text, and asserts
-     *  their level.
-     */
-    public void assertLogMessages(String message, String searchtext, int expectedCount, Level expectedLevel)
-    {
-        int actualCount = 0;
-        for (LoggingEvent logEvent : loggingEvents)
-        {
-            if (logEvent.getRenderedMessage().contains(searchtext))
-            {
-                assertEquals(message + ": log level", expectedLevel, logEvent.getLevel());
-                actualCount++;
-            }
-        }
-        assertEquals(message + ": number of messages", expectedCount, actualCount);
-    }
-
-
-    /**
-     *  Retrieves all records from a single iteration of the reader. Verifies
-     *  that the reader's offsets are updated after each record is read.
-     */
-    private static List<String> retrieveRecords(KinesisReader reader)
-    throws Exception
-    {
-        List<String> retrievedRecords = new ArrayList<String>();
-        for (Record record : reader)
-        {
-            byte[] recordData = BinaryUtils.copyAllBytesFrom(record.getData());
-            retrievedRecords.add(new String(recordData, "UTF-8"));
-            assertEquals("offsets have been updated",
-                         record.getSequenceNumber(),
-                         reader.getCurrentSequenceNumbers().get(extractShardIdFromSeqnum(record.getSequenceNumber())));
-        }
-        return retrievedRecords;
-    }
-
-
-    /**
-     *  A mock class that supports just enough behavior to make the reader work.
-     *  Construct with one or more lists of strings that represent the records
-     *  in a shard.
-     *  <p>
-     *  Note: to simplify mock implementation, shard iterators and sequence
-     *  numbers use the same format.
-     */
-    public static class KinesisMock extends SelfMock<AmazonKinesis>
-    {
-        private String expectedStreamName;
-        private Map<String,Shard> shardsById = new HashMap<String,Shard>();
-        private Map<String,List<Record>> recordsByShard = new HashMap<String,List<Record>>();
-
-        public KinesisMock(String expectedStreamName, List<String>... contentToReturn)
-        {
-            super(AmazonKinesis.class);
-            this.expectedStreamName = expectedStreamName;
-            for (int ii = 0 ; ii < contentToReturn.length ; ii++)
-            {
-                String shardId = formatShardId(ii);
-                List<Record> records = new ArrayList<Record>();
-                for (int jj = 0 ; jj < contentToReturn[ii].size() ; jj++)
-                {
-                    byte[] data = StringUtil.toUTF8(contentToReturn[ii].get(jj));
-                    records.add(new Record()
-                                .withSequenceNumber(formatSequenceNumber(shardId, jj))
-                                .withPartitionKey("ignored")
-                                .withData(ByteBuffer.wrap(data)));
-                }
-                recordsByShard.put(shardId, records);
-            }
-
-            for (Shard shard : createShards(recordsByShard.keySet()))
-            {
-                shardsById.put(shard.getShardId(), shard);
-            }
-        }
-
-        public DescribeStreamResult describeStream(DescribeStreamRequest request)
-        {
-            assertEquals("request contains stream name", expectedStreamName, request.getStreamName());
-
-            return new DescribeStreamResult()
-                       .withStreamDescription(new StreamDescription()
-                           .withStreamName(expectedStreamName)
-                           .withStreamStatus(StreamStatus.ACTIVE)
-                           .withShards(shardsById.values())
-                           .withHasMoreShards(Boolean.FALSE));
-        }
-
-        public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
-        {
-            assertShardIteratorRequest(request);
-
-            String shardId = request.getShardId();
-
-            int offset = 0;
-            switch (ShardIteratorType.fromValue(request.getShardIteratorType()))
-            {
-                case TRIM_HORIZON :
-                    // default value is OK
-                    break;
-                case LATEST :
-                    offset = recordsByShard.get(shardId).size();
-                    break;
-                case AFTER_SEQUENCE_NUMBER :
-                    offset = extractOffsetFromSeqnum(request.getStartingSequenceNumber()) + 1;
-                    break;
-                default :
-                    throw new IllegalArgumentException("unexpected shard iterator type: " + request.getShardIteratorType());
-            }
-
-            return new GetShardIteratorResult().withShardIterator(formatSequenceNumber(shardId, offset));
-        }
-
-        public GetRecordsResult getRecords(GetRecordsRequest request)
-        {
-            String shardItx = request.getShardIterator();
-            String shardId = extractShardIdFromSeqnum(shardItx);
-            int offset = extractOffsetFromSeqnum(shardItx);
-            List<Record> shardRecords = recordsByShard.get(shardId);
-            List<Record> remainingRecords = shardRecords.subList(offset, shardRecords.size());
-            List<Record> returnedRecords = limitReturnedRecords(remainingRecords);
-
-            // we only return a null shard iterator if the shard has been closed
-            String nextShardItx = formatSequenceNumber(shardId, offset + returnedRecords.size());
-            if (nextShardItx.equals(shardsById.get(shardId).getSequenceNumberRange().getEndingSequenceNumber()))
-                nextShardItx = null;
-
-            return new GetRecordsResult()
-                   .withRecords(returnedRecords)
-                   .withNextShardIterator(nextShardItx)
-                   .withMillisBehindLatest(Long.valueOf(0));
-        }
-
-        // hooks for subclasses
-
-        protected List<Shard> createShards(Collection<String> shardIds)
-        {
-            List<Shard> shards = new ArrayList<Shard>();
-            for (String shardId : shardIds)
-            {
-                shards.add(new Shard()
-                           .withShardId(shardId)
-                           .withSequenceNumberRange(new SequenceNumberRange()
-                                                    .withStartingSequenceNumber(formatSequenceNumber(shardId, 0))));
-            }
-            return shards;
-        }
-
-        protected void assertShardIteratorRequest(GetShardIteratorRequest request)
-        {
-            // default does nothing
-        }
-
-        protected List<Record> limitReturnedRecords(List<Record> records)
-        {
-            return records;
-        }
-    }
-
 //----------------------------------------------------------------------------
 //  Setup and teardown
 //----------------------------------------------------------------------------
@@ -953,5 +763,194 @@ public class TestKinesisReader
         reader.iterator();
 
         assertEquals("value after creating new iterator", 0, reader.getMillisBehindLatest());
+    }
+
+//----------------------------------------------------------------------------
+//  Helpers
+//----------------------------------------------------------------------------
+
+    private static String formatShardId(int id)
+    {
+        return String.format("shard-%03d", id);
+    }
+
+
+    private static String formatSequenceNumber(String shardId, int index)
+    {
+        return shardId + "," + String.format("%06d", index);
+    }
+
+
+    private static String extractShardIdFromSeqnum(String sequenceNumber)
+    {
+        return sequenceNumber.split(",")[0];
+    }
+
+
+    private static int extractOffsetFromSeqnum(String sequenceNumber)
+    {
+        return Integer.parseInt(sequenceNumber.split(",")[1]);
+    }
+
+
+    /**
+     *  Identifies all log messages that contain the specified text, and asserts
+     *  their level.
+     */
+    public void assertLogMessages(String message, String searchtext, int expectedCount, Level expectedLevel)
+    {
+        int actualCount = 0;
+        for (LoggingEvent logEvent : loggingEvents)
+        {
+            if (logEvent.getRenderedMessage().contains(searchtext))
+            {
+                assertEquals(message + ": log level", expectedLevel, logEvent.getLevel());
+                actualCount++;
+            }
+        }
+        assertEquals(message + ": number of messages", expectedCount, actualCount);
+    }
+
+
+    /**
+     *  Retrieves all records from a single iteration of the reader. Verifies
+     *  that the reader's offsets are updated after each record is read.
+     */
+    private static List<String> retrieveRecords(KinesisReader reader)
+    throws Exception
+    {
+        List<String> retrievedRecords = new ArrayList<String>();
+        for (Record record : reader)
+        {
+            byte[] recordData = BinaryUtils.copyAllBytesFrom(record.getData());
+            retrievedRecords.add(new String(recordData, "UTF-8"));
+            assertEquals("offsets have been updated",
+                         record.getSequenceNumber(),
+                         reader.getCurrentSequenceNumbers().get(extractShardIdFromSeqnum(record.getSequenceNumber())));
+        }
+        return retrievedRecords;
+    }
+
+
+    /**
+     *  A mock class that supports just enough behavior to make the reader work.
+     *  Construct with one or more lists of strings that represent the records
+     *  in a shard.
+     *  <p>
+     *  Note: to simplify mock implementation, shard iterators and sequence
+     *  numbers use the same format.
+     */
+    public static class KinesisMock extends SelfMock<AmazonKinesis>
+    {
+        private String expectedStreamName;
+        private Map<String,Shard> shardsById = new HashMap<String,Shard>();
+        private Map<String,List<Record>> recordsByShard = new HashMap<String,List<Record>>();
+
+        public KinesisMock(String expectedStreamName, List<String>... contentToReturn)
+        {
+            super(AmazonKinesis.class);
+            this.expectedStreamName = expectedStreamName;
+            for (int ii = 0 ; ii < contentToReturn.length ; ii++)
+            {
+                String shardId = formatShardId(ii);
+                List<Record> records = new ArrayList<Record>();
+                for (int jj = 0 ; jj < contentToReturn[ii].size() ; jj++)
+                {
+                    byte[] data = StringUtil.toUTF8(contentToReturn[ii].get(jj));
+                    records.add(new Record()
+                                .withSequenceNumber(formatSequenceNumber(shardId, jj))
+                                .withPartitionKey("ignored")
+                                .withData(ByteBuffer.wrap(data)));
+                }
+                recordsByShard.put(shardId, records);
+            }
+
+            for (Shard shard : createShards(recordsByShard.keySet()))
+            {
+                shardsById.put(shard.getShardId(), shard);
+            }
+        }
+
+        public DescribeStreamResult describeStream(DescribeStreamRequest request)
+        {
+            assertEquals("request contains stream name", expectedStreamName, request.getStreamName());
+
+            return new DescribeStreamResult()
+                       .withStreamDescription(new StreamDescription()
+                           .withStreamName(expectedStreamName)
+                           .withStreamStatus(StreamStatus.ACTIVE)
+                           .withShards(shardsById.values())
+                           .withHasMoreShards(Boolean.FALSE));
+        }
+
+        public GetShardIteratorResult getShardIterator(GetShardIteratorRequest request)
+        {
+            assertShardIteratorRequest(request);
+
+            String shardId = request.getShardId();
+
+            int offset = 0;
+            switch (ShardIteratorType.fromValue(request.getShardIteratorType()))
+            {
+                case TRIM_HORIZON :
+                    // default value is OK
+                    break;
+                case LATEST :
+                    offset = recordsByShard.get(shardId).size();
+                    break;
+                case AFTER_SEQUENCE_NUMBER :
+                    offset = extractOffsetFromSeqnum(request.getStartingSequenceNumber()) + 1;
+                    break;
+                default :
+                    throw new IllegalArgumentException("unexpected shard iterator type: " + request.getShardIteratorType());
+            }
+
+            return new GetShardIteratorResult().withShardIterator(formatSequenceNumber(shardId, offset));
+        }
+
+        public GetRecordsResult getRecords(GetRecordsRequest request)
+        {
+            String shardItx = request.getShardIterator();
+            String shardId = extractShardIdFromSeqnum(shardItx);
+            int offset = extractOffsetFromSeqnum(shardItx);
+            List<Record> shardRecords = recordsByShard.get(shardId);
+            List<Record> remainingRecords = shardRecords.subList(offset, shardRecords.size());
+            List<Record> returnedRecords = limitReturnedRecords(remainingRecords);
+
+            // we only return a null shard iterator if the shard has been closed
+            String nextShardItx = formatSequenceNumber(shardId, offset + returnedRecords.size());
+            if (nextShardItx.equals(shardsById.get(shardId).getSequenceNumberRange().getEndingSequenceNumber()))
+                nextShardItx = null;
+
+            return new GetRecordsResult()
+                   .withRecords(returnedRecords)
+                   .withNextShardIterator(nextShardItx)
+                   .withMillisBehindLatest(Long.valueOf(0));
+        }
+
+        // hooks for subclasses
+
+        protected List<Shard> createShards(Collection<String> shardIds)
+        {
+            List<Shard> shards = new ArrayList<Shard>();
+            for (String shardId : shardIds)
+            {
+                shards.add(new Shard()
+                           .withShardId(shardId)
+                           .withSequenceNumberRange(new SequenceNumberRange()
+                                                    .withStartingSequenceNumber(formatSequenceNumber(shardId, 0))));
+            }
+            return shards;
+        }
+
+        protected void assertShardIteratorRequest(GetShardIteratorRequest request)
+        {
+            // default does nothing
+        }
+
+        protected List<Record> limitReturnedRecords(List<Record> records)
+        {
+            return records;
+        }
     }
 }

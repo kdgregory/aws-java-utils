@@ -36,16 +36,6 @@ public class TestCloudWatchLogsReader
     private Log4JCapturingAppender logCapture;
 
 //----------------------------------------------------------------------------
-//  Helpers
-//----------------------------------------------------------------------------
-
-    private void assertEvent(List<OutputLogEvent> events, int index, long expectedTimestamp, String expectedMessage)
-    {
-        assertEquals("event " + index + ", timestamp",  expectedTimestamp,  events.get(index).getTimestamp().longValue());
-        assertEquals("event " + index + ", message",    expectedMessage,    events.get(index).getMessage());
-    }
-
-//----------------------------------------------------------------------------
 //  Per-test boilerplate
 //----------------------------------------------------------------------------
 
@@ -245,5 +235,15 @@ public class TestCloudWatchLogsReader
         logCapture.assertLogSize(2);
         logCapture.assertLogEntry(0, Level.DEBUG, "starting retrieve.*foo.*bar");
         logCapture.assertLogEntry(1, Level.DEBUG, "retrieved 2 events from.*foo.*bar");
+    }
+
+//----------------------------------------------------------------------------
+//  Helpers
+//----------------------------------------------------------------------------
+
+    private void assertEvent(List<OutputLogEvent> events, int index, long expectedTimestamp, String expectedMessage)
+    {
+        assertEquals("event " + index + ", timestamp",  expectedTimestamp,  events.get(index).getTimestamp().longValue());
+        assertEquals("event " + index + ", message",    expectedMessage,    events.get(index).getMessage());
     }
 }

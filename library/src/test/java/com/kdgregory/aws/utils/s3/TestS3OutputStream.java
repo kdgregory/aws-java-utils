@@ -288,7 +288,7 @@ public class TestS3OutputStream
     }
 
 //----------------------------------------------------------------------------
-//  Support Code
+//  Helpers
 //----------------------------------------------------------------------------
 
     private static byte[] randomBytes(int length)

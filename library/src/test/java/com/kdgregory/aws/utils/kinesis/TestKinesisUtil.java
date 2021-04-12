@@ -46,7 +46,7 @@ public class TestKinesisUtil
     private Log4JCapturingAppender logCapture;
 
 //----------------------------------------------------------------------------
-//  Common setup
+//  JUnit boilerplate
 //----------------------------------------------------------------------------
 
     @Before
@@ -70,129 +70,6 @@ public class TestKinesisUtil
     private static final List<Shard> SHARDS_2 = Arrays.asList(
                                         new Shard().withShardId("0003"),
                                         new Shard().withShardId("0004"));
-
-//----------------------------------------------------------------------------
-//  Test Helpers
-//----------------------------------------------------------------------------
-
-    /**
-     *  A base mock class that returns a sequence of values for describeStream.
-     *  Constructed with a list of status values and/or exception classes, and
-     *  will return one value for each call. Calls that exceed the number of
-     *  values provided will reuse the last value.
-     *  <p>
-     *  For more complex behaviors, override {@link addToDescription}.
-     */
-    private static class StreamDescriberMock extends SelfMock<AmazonKinesis>
-    {
-        public AtomicInteger describeInvocationCount = new AtomicInteger(0);
-
-        protected String expectedStreamName;
-        protected Object[] statuses;
-
-        public StreamDescriberMock(String expectedStreamName, Object... statuses)
-        {
-            super(AmazonKinesis.class);
-            this.expectedStreamName = expectedStreamName;
-            this.statuses = statuses;
-        }
-
-        @SuppressWarnings("unused")
-        public DescribeStreamResult describeStream(DescribeStreamRequest request)
-        {
-            int idx = describeInvocationCount.getAndIncrement();
-
-            assertEquals("request contains stream name", expectedStreamName, request.getStreamName());
-
-            Object retval = (idx < statuses.length) ? statuses[idx] : statuses[statuses.length - 1];
-            if (retval == ResourceNotFoundException.class)
-            {
-                throw new ResourceNotFoundException("");
-            }
-            else if (retval == LimitExceededException.class)
-            {
-                throw new LimitExceededException("");
-            }
-            else
-            {
-                // note: the base description leaves the shard list null, to fail tests that don't
-                // configure needed shards
-
-                StreamDescription description = new StreamDescription()
-                        .withStreamName(request.getStreamName())
-                        .withStreamStatus((StreamStatus)retval)
-                        .withHasMoreShards(Boolean.FALSE);
-
-                addToDescription(request, description);
-                return new DescribeStreamResult().withStreamDescription(description);
-            }
-        }
-
-        protected void addToDescription(DescribeStreamRequest request, StreamDescription description)
-        {
-            // default implementation does nothing
-        }
-    }
-
-
-    /**
-     *  A mock object for testing the increase/decrease retention period calls. Tracks
-     *  the number of invocations, returns a sequence of status results with current
-     *  retention period, and allows override of the call behavior.
-     */
-    private static class RetentionPeriodMock extends StreamDescriberMock
-    {
-        public AtomicInteger currentRetentionPeriod = new AtomicInteger(0);
-        public AtomicInteger increaseInvocationCount = new AtomicInteger(0);
-        public AtomicInteger decreaseInvocationCount = new AtomicInteger(0);
-
-        private String expectedStreamName;
-        private int expectedRetentionPeriod;
-
-        public RetentionPeriodMock(String expectedStreamName, int startingRetentionPeriod, int expectedRetentionPeriod, Object... statuses)
-        {
-            super(expectedStreamName, statuses);
-            this.expectedStreamName = expectedStreamName;
-            this.expectedRetentionPeriod = expectedRetentionPeriod;
-            this.currentRetentionPeriod.set(startingRetentionPeriod);
-        }
-
-        @Override
-        protected void addToDescription(DescribeStreamRequest request, StreamDescription description)
-        {
-            description.setRetentionPeriodHours(currentRetentionPeriod.get());
-        }
-
-        @SuppressWarnings("unused")
-        public IncreaseStreamRetentionPeriodResult increaseStreamRetentionPeriod(IncreaseStreamRetentionPeriodRequest request)
-        {
-            increaseInvocationCount.getAndIncrement();
-            assertEquals("stream name passed to increaseStreamRetentionPeriod",     expectedStreamName,      request.getStreamName());
-            assertEquals("retntion period passed to increaseStreamRetentionPeriod", expectedRetentionPeriod, request.getRetentionPeriodHours().intValue());
-            increaseStreamRetentionPeriodInternal(request);
-            return new IncreaseStreamRetentionPeriodResult();
-        }
-
-        protected void increaseStreamRetentionPeriodInternal(IncreaseStreamRetentionPeriodRequest request)
-        {
-            currentRetentionPeriod.set(request.getRetentionPeriodHours().intValue());
-        }
-
-        @SuppressWarnings("unused")
-        public DecreaseStreamRetentionPeriodResult decreaseStreamRetentionPeriod(DecreaseStreamRetentionPeriodRequest request)
-        {
-            decreaseInvocationCount.getAndIncrement();
-            assertEquals("stream name passed to decreaseStreamRetentionPeriod",     expectedStreamName,      request.getStreamName());
-            assertEquals("retntion period passed to decreaseStreamRetentionPeriod", expectedRetentionPeriod, request.getRetentionPeriodHours().intValue());
-            decreaseStreamRetentionPeriodInternal(request);
-            return new DecreaseStreamRetentionPeriodResult();
-        }
-
-        protected void decreaseStreamRetentionPeriodInternal(DecreaseStreamRetentionPeriodRequest request)
-        {
-            currentRetentionPeriod.set(request.getRetentionPeriodHours().intValue());
-        }
-    }
 
 //----------------------------------------------------------------------------
 //  Testcases
@@ -1081,4 +958,126 @@ public class TestKinesisUtil
         logCapture.assertLogSize(0);
     }
 
+//----------------------------------------------------------------------------
+//  Test Helpers
+//----------------------------------------------------------------------------
+
+    /**
+     *  A base mock class that returns a sequence of values for describeStream.
+     *  Constructed with a list of status values and/or exception classes, and
+     *  will return one value for each call. Calls that exceed the number of
+     *  values provided will reuse the last value.
+     *  <p>
+     *  For more complex behaviors, override {@link addToDescription}.
+     */
+    private static class StreamDescriberMock extends SelfMock<AmazonKinesis>
+    {
+        public AtomicInteger describeInvocationCount = new AtomicInteger(0);
+
+        protected String expectedStreamName;
+        protected Object[] statuses;
+
+        public StreamDescriberMock(String expectedStreamName, Object... statuses)
+        {
+            super(AmazonKinesis.class);
+            this.expectedStreamName = expectedStreamName;
+            this.statuses = statuses;
+        }
+
+        @SuppressWarnings("unused")
+        public DescribeStreamResult describeStream(DescribeStreamRequest request)
+        {
+            int idx = describeInvocationCount.getAndIncrement();
+
+            assertEquals("request contains stream name", expectedStreamName, request.getStreamName());
+
+            Object retval = (idx < statuses.length) ? statuses[idx] : statuses[statuses.length - 1];
+            if (retval == ResourceNotFoundException.class)
+            {
+                throw new ResourceNotFoundException("");
+            }
+            else if (retval == LimitExceededException.class)
+            {
+                throw new LimitExceededException("");
+            }
+            else
+            {
+                // note: the base description leaves the shard list null, to fail tests that don't
+                // configure needed shards
+
+                StreamDescription description = new StreamDescription()
+                        .withStreamName(request.getStreamName())
+                        .withStreamStatus((StreamStatus)retval)
+                        .withHasMoreShards(Boolean.FALSE);
+
+                addToDescription(request, description);
+                return new DescribeStreamResult().withStreamDescription(description);
+            }
+        }
+
+        protected void addToDescription(DescribeStreamRequest request, StreamDescription description)
+        {
+            // default implementation does nothing
+        }
+    }
+
+
+    /**
+     *  A mock object for testing the increase/decrease retention period calls. Tracks
+     *  the number of invocations, returns a sequence of status results with current
+     *  retention period, and allows override of the call behavior.
+     */
+    private static class RetentionPeriodMock extends StreamDescriberMock
+    {
+        public AtomicInteger currentRetentionPeriod = new AtomicInteger(0);
+        public AtomicInteger increaseInvocationCount = new AtomicInteger(0);
+        public AtomicInteger decreaseInvocationCount = new AtomicInteger(0);
+
+        private String expectedStreamName;
+        private int expectedRetentionPeriod;
+
+        public RetentionPeriodMock(String expectedStreamName, int startingRetentionPeriod, int expectedRetentionPeriod, Object... statuses)
+        {
+            super(expectedStreamName, statuses);
+            this.expectedStreamName = expectedStreamName;
+            this.expectedRetentionPeriod = expectedRetentionPeriod;
+            this.currentRetentionPeriod.set(startingRetentionPeriod);
+        }
+
+        @Override
+        protected void addToDescription(DescribeStreamRequest request, StreamDescription description)
+        {
+            description.setRetentionPeriodHours(currentRetentionPeriod.get());
+        }
+
+        @SuppressWarnings("unused")
+        public IncreaseStreamRetentionPeriodResult increaseStreamRetentionPeriod(IncreaseStreamRetentionPeriodRequest request)
+        {
+            increaseInvocationCount.getAndIncrement();
+            assertEquals("stream name passed to increaseStreamRetentionPeriod",     expectedStreamName,      request.getStreamName());
+            assertEquals("retntion period passed to increaseStreamRetentionPeriod", expectedRetentionPeriod, request.getRetentionPeriodHours().intValue());
+            increaseStreamRetentionPeriodInternal(request);
+            return new IncreaseStreamRetentionPeriodResult();
+        }
+
+        protected void increaseStreamRetentionPeriodInternal(IncreaseStreamRetentionPeriodRequest request)
+        {
+            currentRetentionPeriod.set(request.getRetentionPeriodHours().intValue());
+        }
+
+        @SuppressWarnings("unused")
+        public DecreaseStreamRetentionPeriodResult decreaseStreamRetentionPeriod(DecreaseStreamRetentionPeriodRequest request)
+        {
+            decreaseInvocationCount.getAndIncrement();
+            assertEquals("stream name passed to decreaseStreamRetentionPeriod",     expectedStreamName,      request.getStreamName());
+            assertEquals("retntion period passed to decreaseStreamRetentionPeriod", expectedRetentionPeriod, request.getRetentionPeriodHours().intValue());
+            decreaseStreamRetentionPeriodInternal(request);
+            return new DecreaseStreamRetentionPeriodResult();
+        }
+
+        protected void decreaseStreamRetentionPeriodInternal(DecreaseStreamRetentionPeriodRequest request)
+        {
+            currentRetentionPeriod.set(request.getRetentionPeriodHours().intValue());
+        }
+    }
 }

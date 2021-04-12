@@ -40,43 +40,6 @@ public class TestCloudWatchLogsUtil
     private Log4JCapturingAppender testLog;
 
 //----------------------------------------------------------------------------
-//  Helpers
-//----------------------------------------------------------------------------
-
-    /**
-     *  Asserts that a list of log groups contains all of the expected names.
-     */
-    public static void assertLogGroupNames(List<LogGroup> groups, String... names)
-    {
-        Set<String> lookup = new TreeSet<String>(Arrays.asList(names));
-        for (LogGroup group : groups)
-        {
-            String name = group.getLogGroupName();
-            assertTrue("unexpected log group: " + name, lookup.contains(name));
-            lookup.remove(name); // duplicates will fail
-        }
-
-        assertTrue("missing log groups: " + lookup, lookup.isEmpty());
-    }
-
-
-    /**
-     *  Asserts that a list of log streams contains all of the expected names.
-     */
-    public static void assertLogStreamNames(List<LogStream> streams, String... names)
-    {
-        Set<String> lookup = new TreeSet<String>(Arrays.asList(names));
-        for (LogStream stream : streams)
-        {
-            String name = stream.getLogStreamName();
-            assertTrue("unexpected log stream: " + name, lookup.contains(name));
-            lookup.remove(name); // duplicates will fail
-        }
-
-        assertTrue("missing log streams: " + lookup, lookup.isEmpty());
-    }
-
-//----------------------------------------------------------------------------
 //  Per-test boilerplate
 //----------------------------------------------------------------------------
 
@@ -728,5 +691,42 @@ public class TestCloudWatchLogsUtil
 
         testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log stream.*foo.*argle");
         testLog.assertLogEntry(1, Level.DEBUG, "timeout.*foo.*argle");
+    }
+
+//----------------------------------------------------------------------------
+//  Helpers
+//----------------------------------------------------------------------------
+
+    /**
+     *  Asserts that a list of log groups contains all of the expected names.
+     */
+    public static void assertLogGroupNames(List<LogGroup> groups, String... names)
+    {
+        Set<String> lookup = new TreeSet<String>(Arrays.asList(names));
+        for (LogGroup group : groups)
+        {
+            String name = group.getLogGroupName();
+            assertTrue("unexpected log group: " + name, lookup.contains(name));
+            lookup.remove(name); // duplicates will fail
+        }
+
+        assertTrue("missing log groups: " + lookup, lookup.isEmpty());
+    }
+
+
+    /**
+     *  Asserts that a list of log streams contains all of the expected names.
+     */
+    public static void assertLogStreamNames(List<LogStream> streams, String... names)
+    {
+        Set<String> lookup = new TreeSet<String>(Arrays.asList(names));
+        for (LogStream stream : streams)
+        {
+            String name = stream.getLogStreamName();
+            assertTrue("unexpected log stream: " + name, lookup.contains(name));
+            lookup.remove(name); // duplicates will fail
+        }
+
+        assertTrue("missing log streams: " + lookup, lookup.isEmpty());
     }
 }

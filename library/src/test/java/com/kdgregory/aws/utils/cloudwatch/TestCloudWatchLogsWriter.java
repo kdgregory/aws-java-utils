@@ -46,25 +46,6 @@ public class TestCloudWatchLogsWriter
     // created per-test
     private CloudWatchLogsWriter writer;
 
-
-    private void assertMessages(List<InputLogEvent> actual, String... expected)
-    {
-        assertEquals("number of messages", expected.length, actual.size());
-
-        Iterator<InputLogEvent> eventItx = actual.iterator();
-        for (int ii = 0 ; ii < expected.length ; ii++)
-        {
-            assertEquals("message " + ii, expected[ii], eventItx.next().getMessage());
-        }
-    }
-
-
-    private void assertUnsentMessageQueueSize(int expectedSize)
-    throws Exception
-    {
-        assertEquals("unsent messages", expectedSize, ClassUtil.getFieldValue(writer, "unsentMessages", Queue.class).size());
-    }
-
 //----------------------------------------------------------------------------
 //  Per-test boilerplate
 //----------------------------------------------------------------------------
@@ -564,5 +545,27 @@ public class TestCloudWatchLogsWriter
         logCapture.assertLogSize(2);
         logCapture.assertLogEntry(0, Level.DEBUG, "sending.* 1 .*events.*foo.*bar");
         logCapture.assertLogEntry(1, Level.DEBUG, "sending.* 2 .*events.*foo.*bar");
+    }
+
+//----------------------------------------------------------------------------
+//  Helpers
+//----------------------------------------------------------------------------
+
+    private void assertMessages(List<InputLogEvent> actual, String... expected)
+    {
+        assertEquals("number of messages", expected.length, actual.size());
+
+        Iterator<InputLogEvent> eventItx = actual.iterator();
+        for (int ii = 0 ; ii < expected.length ; ii++)
+        {
+            assertEquals("message " + ii, expected[ii], eventItx.next().getMessage());
+        }
+    }
+
+
+    private void assertUnsentMessageQueueSize(int expectedSize)
+    throws Exception
+    {
+        assertEquals("unsent messages", expectedSize, ClassUtil.getFieldValue(writer, "unsentMessages", Queue.class).size());
     }
 }
