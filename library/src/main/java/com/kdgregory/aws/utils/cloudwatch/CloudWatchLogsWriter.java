@@ -34,14 +34,17 @@ import com.amazonaws.services.logs.AWSLogs;
 import com.amazonaws.services.logs.model.*;
 
 /**
- *  Writes messages to CloudWatch Logs in batches, either under application control
- *  or using a background thread. Messages may be added concurrently by any thread.
- *  Any thread may also call {@link #flush}; invocations are synchronized.
+ *  Writes messages to CloudWatch Logs in batches, which improves throughput.
+ *  Applications add messages to an internal queue with {@link #add}, and can
+ *  either send them explicitly with {@link #flush} or configure a background
+ *  thread to do so. When done, it should call {@link #shutdown} to flush any
+ *  outstanding messages and prevent addition of new messages.
  *  <p>
- *  The writer maintains a set of monitoring variables, such as the number of calls
- *  to {@link #flush}, which can be examined by the application. It writes debug
- *  logging messages for significant events (such as creating a log stream), and
- *  warning messages for unexpected exceptions or rejected messages.
+ *  This object maintains a set of monitoring variables, such as the number of
+ *  calls to {@link #flush}, which can be examined by the application. It writes
+ *  debug logging messages for significant events (such as creating a log stream),
+ *  and warning messages for unexpected exceptions or rejected messages. It can
+ *  also be configured to write debug messages whenever it writes a batch.
  */
 public class CloudWatchLogsWriter
 {
@@ -115,7 +118,7 @@ public class CloudWatchLogsWriter
 
 
 //----------------------------------------------------------------------------
-//  Post-construction API
+//  Post-construction configuration
 //----------------------------------------------------------------------------
 
     /**
@@ -517,5 +520,4 @@ public class CloudWatchLogsWriter
             }
         }
     }
-
 }
