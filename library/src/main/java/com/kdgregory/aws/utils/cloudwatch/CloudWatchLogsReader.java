@@ -155,7 +155,6 @@ public class CloudWatchLogsReader
 //  Public API
 //----------------------------------------------------------------------------
 
-
     /**
      *  Holds a stream name, along with its group name. This is used internally,
      *  and is exposed so that callers can read from independent streams.
@@ -258,7 +257,7 @@ public class CloudWatchLogsReader
 
             try
             {
-                Thread.sleep(500);
+                Thread.sleep(250);
             }
             catch (InterruptedException ex)
             {
@@ -333,5 +332,4 @@ public class CloudWatchLogsReader
             return o1.getTimestamp().compareTo(o2.getTimestamp());
         }
     }
-
 }
