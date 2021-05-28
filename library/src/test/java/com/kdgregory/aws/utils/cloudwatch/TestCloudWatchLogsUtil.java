@@ -55,7 +55,6 @@ public class TestCloudWatchLogsUtil
 //----------------------------------------------------------------------------
 
     @Test
-    // note: this is implemented with LogGroupIterable; detailed testing happens there
     public void testDescribeLogGroups() throws Exception
     {
         MockAWSLogs mock = new MockAWSLogs()
