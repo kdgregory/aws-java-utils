@@ -50,6 +50,7 @@ import com.amazonaws.services.s3.model.*;
  *  and unbounded input queue, then you can run out of memory.
  *
  *  // TODO - add method to return number of uncompleted tasks
+ *  // TODO - support object metadata
  */
 public class MultipartUpload
 {

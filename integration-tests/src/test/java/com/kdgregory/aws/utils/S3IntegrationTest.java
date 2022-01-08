@@ -15,11 +15,15 @@
 package com.kdgregory.aws.utils;
 
 import java.io.ByteArrayOutputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -30,6 +34,7 @@ import static org.junit.Assert.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.sf.kdgcommons.codec.HexCodec;
 import net.sf.kdgcommons.io.IOUtil;
 
 import com.amazonaws.services.s3.AmazonS3;
@@ -37,6 +42,7 @@ import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 
+import com.kdgregory.aws.utils.s3.MultipartUpload;
 import com.kdgregory.aws.utils.s3.ObjectListIterable;
 import com.kdgregory.aws.utils.s3.S3OutputStream;
 
@@ -105,7 +111,7 @@ public class S3IntegrationTest
         byte[] data = new byte[14 * 1024 * 1024];
         (new Random()).nextBytes(data);
 
-        logger.info("testS3OutputStreamSmallFile: uploading to {}", key);
+        logger.info("testS3OutputStreamLargeFile: uploading to {}", key);
         try (OutputStream out = new S3OutputStream(s3Client, bucketName, key))
         {
             out.write(data);
@@ -113,9 +119,95 @@ public class S3IntegrationTest
         downloadAndAssert(key, data);
     }
 
+
+    @Test
+    public void testMultipartuploadInline() throws Exception
+    {
+        int numChunks = 5;
+        String key = UUID.randomUUID().toString();
+        Random rnd = new Random();
+        MessageDigest digester = MessageDigest.getInstance("MD5");
+        byte[] chunk = new byte[1024 * 1024 * 5];
+
+        logger.info("testMultipartuploadInline: uploading to {}", key);
+
+        MultipartUpload upload = new MultipartUpload(s3Client, bucketName, key);
+        
+        // note: let any exceptions propagate; we destroy bucket, don't need to abort
+        upload.begin();
+        for (int ii = 1 ; ii <= numChunks ; ii++)
+        {
+            rnd.nextBytes(chunk);
+            digester.update(chunk);
+            upload.uploadPart(chunk, ii == numChunks);
+        }
+        upload.complete();
+
+        assertObjectDigest(key, digester.digest());
+    }
+
+
+    @Test
+    public void testMultipartuploadConcurrent() throws Exception
+    {
+        int numChunks = 5;
+        String key = UUID.randomUUID().toString();
+        Random rnd = new Random();
+        MessageDigest digester = MessageDigest.getInstance("MD5");
+        byte[] chunk = new byte[1024 * 1024 * 5];
+
+        logger.info("testMultipartuploadConcurrent: uploading to {}", key);
+
+        ExecutorService threadpool = Executors.newFixedThreadPool(4);
+        MultipartUpload upload = new MultipartUpload(s3Client, bucketName, key, threadpool);
+        
+        // note: let any exceptions propagate; we destroy bucket, don't need to abort
+        upload.begin();
+        for (int ii = 1 ; ii <= numChunks ; ii++)
+        {
+            rnd.nextBytes(chunk);
+            try (FileOutputStream fos = new FileOutputStream("/tmp/" + key + "." + ii))
+            {
+                fos.write(chunk);
+            }
+            digester.update(chunk);
+            upload.uploadPart(chunk, ii == numChunks);
+        }
+        // TODO - verify that there are parts outstanding at this point
+        upload.complete();
+        // TODO - verify no parts outstanding at this point
+        
+        threadpool.shutdown();
+
+        assertObjectDigest(key, digester.digest());
+    }
+
+
 //----------------------------------------------------------------------------
 //  Support Code
 //----------------------------------------------------------------------------
+
+    private void assertObjectDigest(String key, byte[] expected)
+    throws Exception
+    {
+        MessageDigest digester = MessageDigest.getInstance("MD5");
+        S3Object obj = s3Client.getObject(bucketName, key);
+        try (InputStream in = obj.getObjectContent())
+        {
+            int r;
+            byte[] buf = new byte[8192];
+            while ((r = in.read(buf)) > 0)
+            {
+                digester.update(buf, 0, r);
+            }
+        }
+
+        byte[] actual = digester.digest();
+        assertEquals("object MD5 matches upload digest",
+                     new HexCodec().toString(expected).toLowerCase(),
+                     new HexCodec().toString(actual).toLowerCase());
+    }
+
 
     private void downloadAndAssert(String key, byte[] expected)
     throws Exception
