@@ -47,9 +47,15 @@ import com.amazonaws.services.s3.model.*;
  *  <p>
  *  <strong>Warning:</strong>
  *  If you produce data faster than it can be uploaded, and use a threadpool with
- *  and unbounded input queue, then you can run out of memory.
+ *  and unbounded input queue, you might run out of memory. To avoid this, call
+ *  {@link #outstandingTaskCount) before submitting a task, and waiting if it's
+ *  too large.
+ *  // TODO - make this automatic
+ *  <p>
+ *  This class is not thread-safe. In particular, calling <code>uploadPart()</code>
+ *  from multiple threads may corrupt the list of outstanding tasks (as well as
+ *  submitting chunks out of order).
  *
- *  // TODO - add method to return number of uncompleted tasks
  *  // TODO - support object metadata
  */
 public class MultipartUpload
@@ -114,7 +120,7 @@ public class MultipartUpload
      *  @param isLastPart   If <code>true</code> signifies that this is the last part of
      *                      the upload.
      */
-    public synchronized void uploadPart(byte[] data, boolean isLastPart)
+    public void uploadPart(byte[] data, boolean isLastPart)
     {
         final int localPartNumber = ++partNumber;
         final UploadPartRequest request = new UploadPartRequest()
@@ -198,6 +204,21 @@ public class MultipartUpload
         AbortMultipartUploadRequest request = new AbortMultipartUploadRequest(bucket, key, uploadId);
         client.abortMultipartUpload(request);
         logger.debug("aborted multi-part upload for s3://" + bucket + "/" + key);
+    }
+
+
+    /**
+     *  Returns the number of outstanding (submitted but not complete) tasks.
+     */
+    public int outstandingTaskCount()
+    {
+        int count = 0;
+        for (Future<PartETag> future : futures)
+        {
+            if (! future.isDone())
+                count++;
+        }
+        return count;
     }
 
 

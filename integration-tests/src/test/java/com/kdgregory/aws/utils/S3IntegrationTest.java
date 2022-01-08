@@ -121,7 +121,7 @@ public class S3IntegrationTest
 
 
     @Test
-    public void testMultipartuploadInline() throws Exception
+    public void testMultipartUploadInline() throws Exception
     {
         int numChunks = 5;
         String key = UUID.randomUUID().toString();
@@ -129,10 +129,10 @@ public class S3IntegrationTest
         MessageDigest digester = MessageDigest.getInstance("MD5");
         byte[] chunk = new byte[1024 * 1024 * 5];
 
-        logger.info("testMultipartuploadInline: uploading to {}", key);
+        logger.info("testMultipartUploadInline: uploading to {}", key);
 
         MultipartUpload upload = new MultipartUpload(s3Client, bucketName, key);
-        
+
         // note: let any exceptions propagate; we destroy bucket, don't need to abort
         upload.begin();
         for (int ii = 1 ; ii <= numChunks ; ii++)
@@ -141,6 +141,8 @@ public class S3IntegrationTest
             digester.update(chunk);
             upload.uploadPart(chunk, ii == numChunks);
         }
+
+        assertEquals("number of outstanding chunks", 0, upload.outstandingTaskCount());
         upload.complete();
 
         assertObjectDigest(key, digester.digest());
@@ -148,7 +150,7 @@ public class S3IntegrationTest
 
 
     @Test
-    public void testMultipartuploadConcurrent() throws Exception
+    public void testMultipartUploadConcurrent() throws Exception
     {
         int numChunks = 5;
         String key = UUID.randomUUID().toString();
@@ -156,11 +158,11 @@ public class S3IntegrationTest
         MessageDigest digester = MessageDigest.getInstance("MD5");
         byte[] chunk = new byte[1024 * 1024 * 5];
 
-        logger.info("testMultipartuploadConcurrent: uploading to {}", key);
+        logger.info("testMultipartUploadConcurrent: uploading to {}", key);
 
         ExecutorService threadpool = Executors.newFixedThreadPool(4);
         MultipartUpload upload = new MultipartUpload(s3Client, bucketName, key, threadpool);
-        
+
         // note: let any exceptions propagate; we destroy bucket, don't need to abort
         upload.begin();
         for (int ii = 1 ; ii <= numChunks ; ii++)
@@ -173,15 +175,17 @@ public class S3IntegrationTest
             digester.update(chunk);
             upload.uploadPart(chunk, ii == numChunks);
         }
-        // TODO - verify that there are parts outstanding at this point
+
+        // these should be submitted faster than they can be written, but how much we don't know
+        assertTrue("number of outstanding chunks before complete()", upload.outstandingTaskCount() > 0);
+
         upload.complete();
-        // TODO - verify no parts outstanding at this point
-        
-        threadpool.shutdown();
+        assertEquals("number of outstanding chunks after complete()", 0, upload.outstandingTaskCount());
 
         assertObjectDigest(key, digester.digest());
-    }
 
+        threadpool.shutdown();
+    }
 
 //----------------------------------------------------------------------------
 //  Support Code
