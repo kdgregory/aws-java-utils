@@ -39,6 +39,7 @@ import net.sf.kdgcommons.io.IOUtil;
 
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
+import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 
@@ -123,7 +124,7 @@ public class S3IntegrationTest
     @Test
     public void testMultipartUploadInline() throws Exception
     {
-        int numChunks = 5;
+        int numChunks = 3;
         String key = UUID.randomUUID().toString();
         Random rnd = new Random();
         MessageDigest digester = MessageDigest.getInstance("MD5");
@@ -146,6 +147,40 @@ public class S3IntegrationTest
         upload.complete();
 
         assertObjectDigest(key, digester.digest());
+    }
+
+
+    @Test
+    public void testMultipartUploadWithMetadata() throws Exception
+    {
+        int numChunks = 2;
+        String key = UUID.randomUUID().toString();
+        Random rnd = new Random();
+        MessageDigest digester = MessageDigest.getInstance("MD5");
+        byte[] chunk = new byte[1024 * 1024 * 5];
+
+        logger.info("testMultipartUploadWithMetadata: uploading to {}", key);
+
+        MultipartUpload upload = new MultipartUpload(s3Client);
+
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentType("application/x-test");
+
+        upload.begin(bucketName, key, metadata);
+        for (int ii = 1 ; ii <= numChunks ; ii++)
+        {
+            rnd.nextBytes(chunk);
+            digester.update(chunk);
+            upload.uploadPart(chunk, ii == numChunks);
+        }
+
+        assertEquals("number of outstanding chunks", 0, upload.outstandingTaskCount());
+        upload.complete();
+
+        assertObjectDigest(key, digester.digest());
+
+        ObjectMetadata retrieved = s3Client.getObjectMetadata(bucketName, key);
+        assertEquals("metadata", metadata.getContentType(), retrieved.getContentType());
     }
 
 

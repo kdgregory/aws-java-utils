@@ -59,11 +59,10 @@ import com.amazonaws.services.s3.model.*;
  *  reach this number, then <code>uploadPart()</code> will block until chunks have
  *  been uploaded.
  *  <p>
- *  This class is not thread-safe. In particular, calling <code>uploadPart()</code>
- *  from multiple threads may corrupt the list of outstanding tasks (as well as
- *  submitting chunks out of order).
- *
- *  // TODO - support object metadata
+ *  This class is not thread-safe. All methods must be called from the same thread,
+ *  and the caller is responsible for synchronizing access. In particular, calls to
+ *  <code>uploadPart()</code> from multiple threads may corrupt internal structures
+ *  and/or upload parts out of order.
  */
 public class MultipartUpload
 {
@@ -112,18 +111,25 @@ public class MultipartUpload
 
 
     /**
-     *  Begins the upload, retrieving the upload token from S3.
-     *
-     *  This runs on the calling thread.
+     *  Begins the upload, with default object metadata.
      */
     public void begin(String bucketName, String keyName)
+    {
+        begin(bucketName, keyName, new ObjectMetadata());
+    }
+
+
+    /**
+     *  Begins the upload, with provided object metadata.
+     */
+    public void begin(String bucketName, String keyName, ObjectMetadata metadata)
     {
         bucket = bucketName;
         key = keyName;
 
         logger.debug("initiating multi-part upload for s3://" + bucket + "/" + key);
 
-        InitiateMultipartUploadRequest request = new InitiateMultipartUploadRequest(bucket, key);
+        InitiateMultipartUploadRequest request = new InitiateMultipartUploadRequest(bucket, key, metadata);
         InitiateMultipartUploadResult response = client.initiateMultipartUpload(request);
 
         uploadId = response.getUploadId();
@@ -188,8 +194,6 @@ public class MultipartUpload
 
     /**
      *  Completes the upload, waiting for all outstanding tasks.
-     *
-     *  This runs on the calling thread.
      */
     public void complete()
     {
