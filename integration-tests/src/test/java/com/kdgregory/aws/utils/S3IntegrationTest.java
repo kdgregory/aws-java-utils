@@ -131,10 +131,10 @@ public class S3IntegrationTest
 
         logger.info("testMultipartUploadInline: uploading to {}", key);
 
-        MultipartUpload upload = new MultipartUpload(s3Client, bucketName, key);
+        MultipartUpload upload = new MultipartUpload(s3Client);
 
         // note: let any exceptions propagate; we destroy bucket, don't need to abort
-        upload.begin();
+        upload.begin(bucketName, key);
         for (int ii = 1 ; ii <= numChunks ; ii++)
         {
             rnd.nextBytes(chunk);
@@ -161,10 +161,10 @@ public class S3IntegrationTest
         logger.info("testMultipartUploadConcurrent: uploading to {}", key);
 
         ExecutorService threadpool = Executors.newFixedThreadPool(4);
-        MultipartUpload upload = new MultipartUpload(s3Client, bucketName, key, threadpool);
+        MultipartUpload upload = new MultipartUpload(s3Client, threadpool);
 
         // note: let any exceptions propagate; we destroy bucket, don't need to abort
-        upload.begin();
+        upload.begin(bucketName, key);
         for (int ii = 1 ; ii <= numChunks ; ii++)
         {
             rnd.nextBytes(chunk);

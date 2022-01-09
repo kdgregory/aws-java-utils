@@ -34,22 +34,30 @@ import com.amazonaws.services.s3.model.*;
 /**
  *  A class for performing multi-part uploads, optionally using a threadpool.
  *  <p>
- *  Each upload uses a separate instance of this class, with shared S3 client
- *  and (if used) threadpool. After construction call {@link #begin} to get
- *  the multi-part upload token from S3. Then call {@link #uploadPart} for
- *  each block of the file. All blocks but the last must be the same size, and
- *  must be 5 MB or larger. Finally, call {@link #complete}. When using a
- *  threadpool, this method will wait for all parts to finish uploading.
+ *  Each instance of this class can perform a single upload at a time. Instances
+ *  may be reused after completing or aborting an upload. Multiple instances may
+ *  share the S3 client and threadpool (which may also be used elsewhere in the
+ *  program).
  *  <p>
- *  Must catch any exceptions and call {@link #abort}, otherwise you'll end up
- *  paying for uncompleted uploads. Note that, when using a threadpool, upload
- *  exceptions will be reported in <code>complete()</code>.
+ *  To upload an object:
+ *  <ol>
+ *  <li> Call {@link #begin}, passing the bucket name, key, and optional metadata.
+ *  <li> Call {@link #uploadPart}, passing a buffer containing a chunk of the data.
+ *       All chunks but the last must be the same size, and must be at least 5MB.
+ *  <li> Call {@link #complete} to finish the upload. When using a threadpool, this
+ *       method will block until all chunks have been uploaded.
+ *  </ol>
+ *
+ *  You must catch any exceptions and call {@link #abort}, otherwise you'll end up
+ *  paying for uncompleted uploads. Note that exceptions may be thrown by both
+ *  <code>uploadPart()</code> and <code>complete()</code>.
  *  <p>
  *  <strong>Warning:</strong>
  *  If you produce data faster than it can be uploaded, and use a threadpool with
- *  and unbounded input queue, you might run out of memory. To avoid this, this
- *  class supports an optional limit on the number of outstanding tasks: calls
- *  to <code>uploadPart()</code> will block if at/over this limit.
+ *  an unbounded input queue, you might run out of memory. To avoid this, you can
+ *  construct the instance with a maximum number of outstanding chunks. If you
+ *  reach this number, then <code>uploadPart()</code> will block until chunks have
+ *  been uploaded.
  *  <p>
  *  This class is not thread-safe. In particular, calling <code>uploadPart()</code>
  *  from multiple threads may corrupt the list of outstanding tasks (as well as
@@ -69,38 +77,36 @@ public class MultipartUpload
     private String key;
 
     private String uploadId;
-    private int partNumber = 0; // note: part numbers start at 1, must increment before submitting
-    private List<Future<PartETag>> futures = new ArrayList<>();
+    private int partNumber;
+    private List<Future<PartETag>> futures;
 
 
     /**
      *  Constructs an instance that performs the upload on the calling thread.
      */
-    public MultipartUpload(AmazonS3 client, String bucket, String key)
+    public MultipartUpload(AmazonS3 client)
     {
         this.client = client;
-        this.bucket = bucket;
-        this.key = key;
     }
 
 
     /**
-     *  Constructs an instance with performs the upload using the provided threadpool.
+     *  Constructs an instance that performs uploads using the provided threadpool.
      */
-    public MultipartUpload(AmazonS3 client, String bucket, String key, ExecutorService executor)
+    public MultipartUpload(AmazonS3 client, ExecutorService executor)
     {
-        this(client, bucket, key);
+        this(client);
         this.executor = executor;
     }
 
 
     /**
-     *  Constructs an instance with performs the upload using the provided threadpool, limiting
-     *  the number of outstanding tasks.
+     *  Constructs an instance that performs uploads using the provided threadpool,
+     *  limiting the number of outstanding tasks.
      */
-    public MultipartUpload(AmazonS3 client, String bucket, String key, ExecutorService executor, int maxOutstandingTasks)
+    public MultipartUpload(AmazonS3 client, ExecutorService executor, int maxOutstandingTasks)
     {
-        this(client, bucket, key, executor);
+        this(client, executor);
         this.maxOutstandingTasks = maxOutstandingTasks;
     }
 
@@ -110,14 +116,20 @@ public class MultipartUpload
      *
      *  This runs on the calling thread.
      */
-    public void begin()
+    public void begin(String bucketName, String keyName)
     {
+        bucket = bucketName;
+        key = keyName;
+
         logger.debug("initiating multi-part upload for s3://" + bucket + "/" + key);
 
         InitiateMultipartUploadRequest request = new InitiateMultipartUploadRequest(bucket, key);
         InitiateMultipartUploadResult response = client.initiateMultipartUpload(request);
 
         uploadId = response.getUploadId();
+        partNumber = 0; // note: part numbers start at 1, must pre-increment for each part
+        futures = new ArrayList<>();
+
         logger.debug("initiated multi-part upload for s3://" + bucket + "/" + key + "; upload ID is " + uploadId);
     }
 
