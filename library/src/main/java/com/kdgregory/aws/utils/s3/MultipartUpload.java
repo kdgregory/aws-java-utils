@@ -47,10 +47,9 @@ import com.amazonaws.services.s3.model.*;
  *  <p>
  *  <strong>Warning:</strong>
  *  If you produce data faster than it can be uploaded, and use a threadpool with
- *  and unbounded input queue, you might run out of memory. To avoid this, call
- *  {@link #outstandingTaskCount) before submitting a task, and waiting if it's
- *  too large.
- *  // TODO - make this automatic
+ *  and unbounded input queue, you might run out of memory. To avoid this, this
+ *  class supports an optional limit on the number of outstanding tasks: calls
+ *  to <code>uploadPart()</code> will block if at/over this limit.
  *  <p>
  *  This class is not thread-safe. In particular, calling <code>uploadPart()</code>
  *  from multiple threads may corrupt the list of outstanding tasks (as well as
@@ -64,6 +63,7 @@ public class MultipartUpload
 
     private AmazonS3 client;
     private ExecutorService executor;
+    private int maxOutstandingTasks = Integer.MAX_VALUE;
 
     private String bucket;
     private String key;
@@ -91,6 +91,17 @@ public class MultipartUpload
     {
         this(client, bucket, key);
         this.executor = executor;
+    }
+
+
+    /**
+     *  Constructs an instance with performs the upload using the provided threadpool, limiting
+     *  the number of outstanding tasks.
+     */
+    public MultipartUpload(AmazonS3 client, String bucket, String key, ExecutorService executor, int maxOutstandingTasks)
+    {
+        this(client, bucket, key, executor);
+        this.maxOutstandingTasks = maxOutstandingTasks;
     }
 
 
@@ -149,6 +160,7 @@ public class MultipartUpload
 
         if (executor != null)
         {
+            waitForTaskSlot();
             futures.add(executor.submit(callable));
         }
         else
@@ -212,19 +224,43 @@ public class MultipartUpload
      */
     public int outstandingTaskCount()
     {
-        int count = 0;
-        for (Future<PartETag> future : futures)
-        {
-            if (! future.isDone())
-                count++;
-        }
-        return count;
+        return outstandingTasks().size();
     }
 
 
 //----------------------------------------------------------------------------
 //  Internals
 //----------------------------------------------------------------------------
+
+    /**
+     *  Returns all tasks that are not yet done.
+     */
+    private List<Future<PartETag>> outstandingTasks()
+    {
+        List<Future<PartETag>> result = new ArrayList<>();
+        for (Future<PartETag> future : futures)
+        {
+            if (!future.isDone())
+                result.add(future);
+        }
+        return result;
+    }
+
+
+    /**
+     *  Waits until the outstanding tasks are below the limit.
+     */
+    private void waitForTaskSlot()
+    {
+        while (true)
+        {
+            List<Future<PartETag>> tasks = outstandingTasks();
+            if (tasks.isEmpty() || tasks.size() < maxOutstandingTasks)
+                return;
+            unwrap(tasks.get(0));
+        }
+    }
+
 
     /**
      *  Common code for unwrapping an upload Future, throwing any exception as

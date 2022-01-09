@@ -176,7 +176,7 @@ public class S3IntegrationTest
             upload.uploadPart(chunk, ii == numChunks);
         }
 
-        // these should be submitted faster than they can be written, but how much we don't know
+        // these should be submitted faster than they can be written, we don't know exact numbers
         assertTrue("number of outstanding chunks before complete()", upload.outstandingTaskCount() > 0);
 
         upload.complete();
