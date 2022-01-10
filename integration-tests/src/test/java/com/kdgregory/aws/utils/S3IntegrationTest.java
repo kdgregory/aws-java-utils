@@ -151,36 +151,33 @@ public class S3IntegrationTest
 
 
     @Test
-    public void testMultipartUploadWithMetadata() throws Exception
+    public void testMultipartUploadInlinePartialBuffer() throws Exception
     {
-        int numChunks = 2;
+        int numChunks = 3;
         String key = UUID.randomUUID().toString();
         Random rnd = new Random();
         MessageDigest digester = MessageDigest.getInstance("MD5");
-        byte[] chunk = new byte[1024 * 1024 * 5];
+        byte[] chunk = new byte[1024 * 1024 * 6];
+        int off = 1024;
+        int len = 1024 * 1024 * 5;
 
-        logger.info("testMultipartUploadWithMetadata: uploading to {}", key);
+        logger.info("testMultipartUploadInlinePartialBuffer: uploading to {}", key);
 
         MultipartUpload upload = new MultipartUpload(s3Client);
 
-        ObjectMetadata metadata = new ObjectMetadata();
-        metadata.setContentType("application/x-test");
-
-        upload.begin(bucketName, key, metadata);
+        // note: let any exceptions propagate; we destroy bucket, don't need to abort
+        upload.begin(bucketName, key);
         for (int ii = 1 ; ii <= numChunks ; ii++)
         {
             rnd.nextBytes(chunk);
-            digester.update(chunk);
-            upload.uploadPart(chunk, ii == numChunks);
+            digester.update(chunk, off, len);
+            upload.uploadPart(chunk, off, len, ii == numChunks);
         }
 
         assertEquals("number of outstanding chunks", 0, upload.outstandingTaskCount());
         upload.complete();
 
         assertObjectDigest(key, digester.digest());
-
-        ObjectMetadata retrieved = s3Client.getObjectMetadata(bucketName, key);
-        assertEquals("metadata", metadata.getContentType(), retrieved.getContentType());
     }
 
 
@@ -220,6 +217,81 @@ public class S3IntegrationTest
         assertObjectDigest(key, digester.digest());
 
         threadpool.shutdown();
+    }
+
+
+    @Test
+    public void testMultipartUploadConcurrentPartialBuffer() throws Exception
+    {
+        int numChunks = 5;
+        String key = UUID.randomUUID().toString();
+        Random rnd = new Random();
+        MessageDigest digester = MessageDigest.getInstance("MD5");
+        byte[] chunk = new byte[1024 * 1024 * 6];
+        int off = 1024;
+        int len = 1024 * 1024 * 5;
+
+        logger.info("testMultipartUploadConcurrentPartialBuffer: uploading to {}", key);
+
+        ExecutorService threadpool = Executors.newFixedThreadPool(4);
+        MultipartUpload upload = new MultipartUpload(s3Client, threadpool);
+
+        // note: let any exceptions propagate; we destroy bucket, don't need to abort
+        upload.begin(bucketName, key);
+        for (int ii = 1 ; ii <= numChunks ; ii++)
+        {
+            rnd.nextBytes(chunk);
+            try (FileOutputStream fos = new FileOutputStream("/tmp/" + key + "." + ii))
+            {
+                fos.write(chunk);
+            }
+            digester.update(chunk, off, len);
+            upload.uploadPart(chunk, off, len, ii == numChunks);
+        }
+
+        // these should be submitted faster than they can be written, we don't know exact numbers
+        assertTrue("number of outstanding chunks before complete()", upload.outstandingTaskCount() > 0);
+
+        upload.complete();
+        assertEquals("number of outstanding chunks after complete()", 0, upload.outstandingTaskCount());
+
+        assertObjectDigest(key, digester.digest());
+
+        threadpool.shutdown();
+    }
+
+
+    @Test
+    public void testMultipartUploadWithMetadata() throws Exception
+    {
+        int numChunks = 2;
+        String key = UUID.randomUUID().toString();
+        Random rnd = new Random();
+        MessageDigest digester = MessageDigest.getInstance("MD5");
+        byte[] chunk = new byte[1024 * 1024 * 5];
+
+        logger.info("testMultipartUploadWithMetadata: uploading to {}", key);
+
+        MultipartUpload upload = new MultipartUpload(s3Client);
+
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentType("application/x-test");
+
+        upload.begin(bucketName, key, metadata);
+        for (int ii = 1 ; ii <= numChunks ; ii++)
+        {
+            rnd.nextBytes(chunk);
+            digester.update(chunk);
+            upload.uploadPart(chunk, ii == numChunks);
+        }
+
+        assertEquals("number of outstanding chunks", 0, upload.outstandingTaskCount());
+        upload.complete();
+
+        assertObjectDigest(key, digester.digest());
+
+        ObjectMetadata retrieved = s3Client.getObjectMetadata(bucketName, key);
+        assertEquals("metadata", metadata.getContentType(), retrieved.getContentType());
     }
 
 //----------------------------------------------------------------------------

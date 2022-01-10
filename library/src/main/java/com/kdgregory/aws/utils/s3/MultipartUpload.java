@@ -145,20 +145,54 @@ public class MultipartUpload
      *  the upload inline.
      *
      *  @param data         The chunk to upload. Must be >= 5 MB, except for last chunk.
-     *                      Will be defensively copied, allowing caller to refill array.
+     *                      Will be defensively copied, allowing caller to modify array
+     *                      while chunk is awaiting upload.
      *  @param isLastPart   If <code>true</code> signifies that this is the last part of
      *                      the upload.
      */
     public void uploadPart(byte[] data, boolean isLastPart)
     {
+        uploadPart(data, 0, data.length, isLastPart);
+    }
+
+
+    /**
+     *  Uploads a part from within a larger buffer. This will either dispatch a task to the
+     *  threadpool or execute the upload inline.
+     *  <p>
+     *  Note: when using a threadpool, the provided buffer is copied, and may be modified
+     *  by the caller while the task is outstanding. When executing inline, the buffer is
+     *  not copied, and must not be modified by another thread until the part is uploaded.
+     *
+     *  @param data         Contains the part to upload.
+     *  @param off          Offset of part within passed array.
+     *  @param len          Length of part within passed array.
+     *  @param isLastPart   If <code>true</code> signifies that this is the last part of
+     *                      the upload.
+     */
+    public void uploadPart(byte[] data, int off, int len, boolean isLastPart)
+    {
         final int localPartNumber = ++partNumber;
+
+        ByteArrayInputStream dataStream;
+        if (executor != null)
+        {
+            byte[] localBuf = new byte[len];
+            System.arraycopy(data, off, localBuf, 0, len);
+            dataStream = new ByteArrayInputStream(localBuf);
+        }
+        else
+        {
+            dataStream = new ByteArrayInputStream(data, off, len);
+        }
+
         final UploadPartRequest request = new UploadPartRequest()
                                           .withBucketName(bucket)
                                           .withKey(key)
                                           .withUploadId(uploadId)
                                           .withPartNumber(localPartNumber)
-                                          .withPartSize(data.length)
-                                          .withInputStream(new ByteArrayInputStream(data.clone()))
+                                          .withPartSize(len)
+                                          .withInputStream(dataStream)
                                           .withLastPart(isLastPart);
 
         logger.debug("submitting part " + localPartNumber + " for s3://" + bucket + "/" + key);
