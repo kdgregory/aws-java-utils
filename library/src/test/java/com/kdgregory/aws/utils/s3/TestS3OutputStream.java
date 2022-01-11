@@ -30,6 +30,8 @@ import com.amazonaws.services.s3.model.UploadPartRequest;
 import com.kdgregory.aws.utils.testhelpers.mocks.MockAmazonS3;
 
 
+// note: this is also a test for MultipartUpload
+
 public class TestS3OutputStream
 {
     private MockAmazonS3 mock = new MockAmazonS3();

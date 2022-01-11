@@ -17,10 +17,7 @@ package com.kdgregory.aws.utils.s3;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.ArrayList;
-import java.util.List;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -79,13 +76,10 @@ extends OutputStream
     private ObjectMetadata metadata;
 
     // this is assigned once the upload has started
-    private String uploadToken;
+    private MultipartUpload upload;
 
     // this is assigned at construction, nulled at completion or if aboarted
     private ExposedByteArrayOutputStream buffer;
-
-    private int partNumber;
-    private List<PartETag> partTags = new ArrayList<>();
 
 
     /**
@@ -162,18 +156,18 @@ extends OutputStream
         if (buffer == null)
             return;
 
-        if (uploadToken == null)
+        if (upload == null)
         {
             logger.debug("buffer size is " + buffer.size() + "; using PutObject");
-            metadata.setContentLength(buffer.size());
-            client.putObject(bucket, key, buffer.asInputStream(), metadata);
+            int uploadSize = buffer.size();
+            ByteArrayInputStream uploadChunk = new ByteArrayInputStream(buffer.get(), 0, uploadSize);
+            metadata.setContentLength(uploadSize);
+            client.putObject(bucket, key, uploadChunk, metadata);
         }
         else
         {
-            writePart();
-            logger.debug("completing multi-part upload; token: " + uploadToken.substring(0, 16));
-            CompleteMultipartUploadRequest completeRequest = new CompleteMultipartUploadRequest(bucket, key, uploadToken, partTags);
-            client.completeMultipartUpload(completeRequest);
+            writePart(true);
+            upload.complete();
         }
 
         buffer = null;
@@ -252,17 +246,11 @@ extends OutputStream
      */
     public void abort()
     {
-        if (buffer == null)
-            return;
-
         buffer = null;
-
-        if (uploadToken == null)
-            return;
-
-        logger.debug("aborting multi-part upload; token: " + uploadToken.substring(0, 16));
-        AbortMultipartUploadRequest request = new AbortMultipartUploadRequest(bucket, key, uploadToken);
-        client.abortMultipartUpload(request);
+        if (upload != null)
+        {
+            upload.abort();
+        }
     }
 
 //----------------------------------------------------------------------------
@@ -285,10 +273,9 @@ extends OutputStream
             this.partSize = partSize;
         }
 
-        public InputStream asInputStream()
+        public byte[] get()
         {
-            int size = Math.min(partSize, count);
-            return new ByteArrayInputStream(buf, 0, size);
+            return buf;
         }
 
         /**
@@ -317,32 +304,20 @@ extends OutputStream
     {
         while (buffer.size() >= partSize)
         {
-            if (uploadToken == null)
+            if (upload == null)
             {
-                logger.debug("initiating multi-part upload");
-                InitiateMultipartUploadRequest initRequest = new InitiateMultipartUploadRequest(bucket, key, metadata);
-                InitiateMultipartUploadResult initResponse = client.initiateMultipartUpload(initRequest);
-                uploadToken = initResponse.getUploadId();
-                logger.debug("multi-part upload initiated; token: " + uploadToken.substring(0, 16));
+                upload = new MultipartUpload(client);
+                upload.begin(bucket, key, metadata);
             }
-            writePart();
+            writePart(false);
         }
     }
 
 
-    private void writePart()
+    private void writePart(boolean isLast)
     {
-        partNumber++;
-        logger.debug("uploading part " + partNumber + "; token: " + uploadToken.substring(0, 16));
-        UploadPartRequest request = new UploadPartRequest()
-                                    .withBucketName(bucket)
-                                    .withKey(key)
-                                    .withUploadId(uploadToken)
-                                    .withPartNumber(partNumber)
-                                    .withPartSize(Math.min(partSize, buffer.size()))
-                                    .withInputStream(buffer.asInputStream());
-        UploadPartResult response = client.uploadPart(request);
-        partTags.add(response.getPartETag());
+        int uploadSize = Math.min(partSize, buffer.size());
+        upload.uploadPart(buffer.get(), 0, uploadSize, isLast);
         buffer.reset();
     }
 }
