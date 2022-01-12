@@ -14,7 +14,6 @@
 
 package com.kdgregory.aws.utils;
 
-import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -26,6 +25,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -35,7 +35,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.sf.kdgcommons.codec.HexCodec;
-import net.sf.kdgcommons.io.IOUtil;
 
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
@@ -55,8 +54,13 @@ public class S3IntegrationTest
     private static String bucketName = UUID.randomUUID().toString();
     private static AmazonS3 s3Client;
 
+    // a couple of common objects, recreated for each test
+    private Random rnd;
+    private String key;
+    private MessageDigest digester;
+
 //----------------------------------------------------------------------------
-//  Create/destroy the test bucket
+//  Setup for all tests in this file
 //----------------------------------------------------------------------------
 
     @BeforeClass
@@ -86,51 +90,31 @@ public class S3IntegrationTest
         s3Client.shutdown();
     }
 
+
+//----------------------------------------------------------------------------
+//  Per-test setup
+//----------------------------------------------------------------------------
+
+    @Before
+    public void setUp()
+    throws Exception
+    {
+        rnd = new Random();
+        key = UUID.randomUUID().toString();
+        digester = MessageDigest.getInstance("MD5");
+    }
+
 //----------------------------------------------------------------------------
 //  Testcases
 //----------------------------------------------------------------------------
 
     @Test
-    public void testS3OutputStreamSmallFile() throws Exception
-    {
-        String key = UUID.randomUUID().toString();
-        byte[] data = "hello, world".getBytes(StandardCharsets.UTF_8);
-
-        logger.info("testS3OutputStreamSmallFile: uploading to {}", key);
-        try (OutputStream out = new S3OutputStream(s3Client, bucketName, key))
-        {
-            out.write(data);
-        }
-        downloadAndAssert(key, data);
-    }
-
-
-    @Test
-    public void testS3OutputStreamLargeFile() throws Exception
-    {
-        String key = UUID.randomUUID().toString();
-        byte[] data = new byte[14 * 1024 * 1024];
-        (new Random()).nextBytes(data);
-
-        logger.info("testS3OutputStreamLargeFile: uploading to {}", key);
-        try (OutputStream out = new S3OutputStream(s3Client, bucketName, key))
-        {
-            out.write(data);
-        }
-        downloadAndAssert(key, data);
-    }
-
-
-    @Test
     public void testMultipartUploadInline() throws Exception
     {
-        int numChunks = 3;
-        String key = UUID.randomUUID().toString();
-        Random rnd = new Random();
-        MessageDigest digester = MessageDigest.getInstance("MD5");
-        byte[] chunk = new byte[1024 * 1024 * 5];
-
         logger.info("testMultipartUploadInline: uploading to {}", key);
+
+        int numChunks = 3;
+        byte[] chunk = new byte[1024 * 1024 * 5];
 
         MultipartUpload upload = new MultipartUpload(s3Client);
 
@@ -153,15 +137,12 @@ public class S3IntegrationTest
     @Test
     public void testMultipartUploadInlinePartialBuffer() throws Exception
     {
+        logger.info("testMultipartUploadInlinePartialBuffer: uploading to {}", key);
+
         int numChunks = 3;
-        String key = UUID.randomUUID().toString();
-        Random rnd = new Random();
-        MessageDigest digester = MessageDigest.getInstance("MD5");
         byte[] chunk = new byte[1024 * 1024 * 6];
         int off = 1024;
         int len = 1024 * 1024 * 5;
-
-        logger.info("testMultipartUploadInlinePartialBuffer: uploading to {}", key);
 
         MultipartUpload upload = new MultipartUpload(s3Client);
 
@@ -184,13 +165,10 @@ public class S3IntegrationTest
     @Test
     public void testMultipartUploadConcurrent() throws Exception
     {
-        int numChunks = 5;
-        String key = UUID.randomUUID().toString();
-        Random rnd = new Random();
-        MessageDigest digester = MessageDigest.getInstance("MD5");
-        byte[] chunk = new byte[1024 * 1024 * 5];
-
         logger.info("testMultipartUploadConcurrent: uploading to {}", key);
+
+        int numChunks = 5;
+        byte[] chunk = new byte[1024 * 1024 * 5];
 
         ExecutorService threadpool = Executors.newFixedThreadPool(4);
         MultipartUpload upload = new MultipartUpload(s3Client, threadpool);
@@ -223,15 +201,12 @@ public class S3IntegrationTest
     @Test
     public void testMultipartUploadConcurrentPartialBuffer() throws Exception
     {
+        logger.info("testMultipartUploadConcurrentPartialBuffer: uploading to {}", key);
+
         int numChunks = 5;
-        String key = UUID.randomUUID().toString();
-        Random rnd = new Random();
-        MessageDigest digester = MessageDigest.getInstance("MD5");
         byte[] chunk = new byte[1024 * 1024 * 6];
         int off = 1024;
         int len = 1024 * 1024 * 5;
-
-        logger.info("testMultipartUploadConcurrentPartialBuffer: uploading to {}", key);
 
         ExecutorService threadpool = Executors.newFixedThreadPool(4);
         MultipartUpload upload = new MultipartUpload(s3Client, threadpool);
@@ -264,13 +239,10 @@ public class S3IntegrationTest
     @Test
     public void testMultipartUploadWithMetadata() throws Exception
     {
-        int numChunks = 2;
-        String key = UUID.randomUUID().toString();
-        Random rnd = new Random();
-        MessageDigest digester = MessageDigest.getInstance("MD5");
-        byte[] chunk = new byte[1024 * 1024 * 5];
-
         logger.info("testMultipartUploadWithMetadata: uploading to {}", key);
+
+        int numChunks = 2;
+        byte[] chunk = new byte[1024 * 1024 * 5];
 
         MultipartUpload upload = new MultipartUpload(s3Client);
 
@@ -294,42 +266,65 @@ public class S3IntegrationTest
         assertEquals("metadata", metadata.getContentType(), retrieved.getContentType());
     }
 
+
+    @Test
+    public void testS3OutputStreamInlineSmallFile() throws Exception
+    {
+        byte[] data = "hello, world".getBytes(StandardCharsets.UTF_8);
+
+        logger.info("testS3OutputStreamSmallFile: uploading to {}", key);
+        try (OutputStream out = new S3OutputStream(s3Client, bucketName, key))
+        {
+            out.write(data);
+        }
+
+        assertObjectDigest(key, digester.digest(data));
+    }
+
+
+    @Test
+    public void testS3OutputStreamInlineLargeFile() throws Exception
+    {
+        logger.info("testS3OutputStreamLargeFile: uploading to {}", key);
+
+        // the size of this buffer means that we won't neatly fit into the upload size
+        byte[] data = new byte[1024 * 1024 + 17];
+
+        try (OutputStream out = new S3OutputStream(s3Client, bucketName, key))
+        {
+            for (int ii = 0 ; ii < 14 ; ii++)
+            {
+                rnd.nextBytes(data);
+                digester.update(data);
+                out.write(data);
+            }
+        }
+
+        assertObjectDigest(key, digester.digest());
+    }
+
 //----------------------------------------------------------------------------
 //  Support Code
 //----------------------------------------------------------------------------
 
-    private void assertObjectDigest(String key, byte[] expected)
+    private void assertObjectDigest(String objectKey, byte[] expectedDigest)
     throws Exception
     {
-        MessageDigest digester = MessageDigest.getInstance("MD5");
-        S3Object obj = s3Client.getObject(bucketName, key);
+        MessageDigest downloadDigester = MessageDigest.getInstance("MD5");
+        S3Object obj = s3Client.getObject(bucketName, objectKey);
         try (InputStream in = obj.getObjectContent())
         {
             int r;
             byte[] buf = new byte[8192];
             while ((r = in.read(buf)) > 0)
             {
-                digester.update(buf, 0, r);
+                downloadDigester.update(buf, 0, r);
             }
         }
 
-        byte[] actual = digester.digest();
+        byte[] actualDigest = downloadDigester.digest();
         assertEquals("object MD5 matches upload digest",
-                     new HexCodec().toString(expected).toLowerCase(),
-                     new HexCodec().toString(actual).toLowerCase());
-    }
-
-
-    private void downloadAndAssert(String key, byte[] expected)
-    throws Exception
-    {
-        ByteArrayOutputStream out = new ByteArrayOutputStream(expected.length);
-        S3Object obj = s3Client.getObject(bucketName, key);
-        try (InputStream in = obj.getObjectContent())
-        {
-            IOUtil.copy(in, out);
-        }
-
-        assertArrayEquals("downloaded file", expected, out.toByteArray());
+                     new HexCodec().toString(expectedDigest).toLowerCase(),
+                     new HexCodec().toString(actualDigest).toLowerCase());
     }
 }
