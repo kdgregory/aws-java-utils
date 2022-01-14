@@ -17,10 +17,8 @@ package com.kdgregory.aws.utils.s3;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -30,9 +28,10 @@ import com.amazonaws.services.s3.model.*;
 
 
 /**
- *  Uses a multi-part upload to send arbitrary-length streams to S3. It is somewhat
- *  simpler to use than <code>TransferManager</code>, and does not spin up extra
- *  threads.
+ *  A stream that transparently writes to S3, so that the program doesn't have to
+ *  explicitly buffer output. Will transition from using PutObject to a multi-part
+ *  upload, based on the amount of data written. Allows use of a threadpool to do
+ *  uploads, so that the program can overlap data generation and physical writes. 
  *  <p>
  *  Use as with any other output stream, with one caveat: you should wrap all code
  *  in a try/catch, to abort the stream on any exception. For example:
@@ -58,10 +57,11 @@ import com.amazonaws.services.s3.model.*;
  *  storage. To avoid such charges, you configure your bucket with a life-cycle
  *  rule that deletes incomplete uploads.
  *  <p>
- *  Internally, it stores all writes in a buffer until it's accumulated enough
- *  to upload a part (by default, 5 MB). At that point it uploads the part inline
- *  (note that this will pause your application) and resets for the next part. On
- *  close, it writes all outstanding data as a final part.
+ *  Internally, this stream stores all writes in a buffer until it's accumulated
+ *  enough to upload a part (by default, 5 MB). At that point it uploads the part
+ *  (inline or on a threadpool) and resets the buffer. On close, it writes all 
+ *  outstanding data as a final part, and waits for all parts to finish uploading.
+ *  When <code>close()</code> returns, the file will be in S3.
  *  <p>
  *  Implementation note: the actual upload starts when the buffer first fills. An
  *  improperly-configured client will not be discovered until then.
@@ -73,31 +73,30 @@ extends OutputStream
 
     // these are set by constructor
     private AmazonS3 client;
+    private ExecutorService threadpool;
+    private int maxOutstanding;
     private String bucket;
     private String key;
     private int partSize;
     private ObjectMetadata metadata;
 
     // this is assigned once the upload has started
-    private String uploadToken;
+    private MultipartUpload upload;
 
     // this is assigned at construction, nulled at completion or if aboarted
     private ExposedByteArrayOutputStream buffer;
 
-    private int partNumber;
-    private List<PartETag> partTags = new ArrayList<>();
-
 
     /**
-     *  Constructs an instance with the default part size (5 MB) and default
-     *  object metadata.
+     *  Constructs an instance that uploads chunks inline, with the default part
+     *  size (5 MB) and default object metadata.
      *  <p>
      *  Uploads using this constructor are limited to 50GB; if you need to
      *  upload more data, you must specify a larger part size.
      *
-     *  @param  client  A properly-configured client, used to perform the write.
-     *  @param  bucket  The bucket where the stream is to be written.
-     *  @param  key     The name of the file in that bucket.
+     *  @param  client      The S3 client that will be used for uploading.
+     *  @param  bucket      The bucket where the stream is to be written.
+     *  @param  key         The name of the file in that bucket.
      */
     public S3OutputStream(AmazonS3 client, String bucket, String key)
     {
@@ -106,15 +105,15 @@ extends OutputStream
 
 
     /**
-     *  Constructs an instance with the default part size (5 MB) and provided
-     *  object metadata.
+     *  Constructs an instance that uploads chunks inline, with the default part
+     *  size (5 MB) and specified object metadata.
      *  <p>
      *  Uploads using this constructor are limited to 50GB; if you need to
      *  upload more data, you must specify a larger part size.
      *
-     *  @param  client  A properly-configured client, used to perform the write.
-     *  @param  bucket  The bucket where the stream is to be written.
-     *  @param  key     The name of the file in that bucket.
+     *  @param  client      The S3 client that will be used for uploading.
+     *  @param  bucket      The bucket where the stream is to be written.
+     *  @param  key         The name of the file in that bucket.
      *  @param  metadata    Object metadata. This can be used to provide content
      *                      type or caller-defined headers. Any provided content
      *                      length is ignored.
@@ -126,20 +125,67 @@ extends OutputStream
 
 
     /**
-     *  Constructs an instance with the specified part size and explicit object
-     *  metadata. Part size must be at least 5 MB.
+     *  Constructs an instance that uploads chunks inline, with the specified part
+     *  size (5 MB) and object metadata. Part size must be at least 5MB.
      *
-     *  @param  client      A properly-configured client, used to perform the write.
-     * @param  bucket      The bucket where the stream is to be written.
-     * @param  key         The name of the file in that bucket.
-     * @param  metadata    Object metadata. This can be used to provide content
+     *  @param  client      The S3 client that will be used for uploading.
+     *  @param  bucket      The bucket where the stream is to be written.
+     *  @param  key         The name of the file in that bucket.
+     *  @param  metadata    Object metadata. This can be used to provide content
      *                      type or caller-defined headers. Any provided content
      *                      length is ignored.
-     * @param  partSize    Number of bytes to buffer before uploading.
+     *  @param  partSize    Number of bytes to upload in a chunk. Must be >= 5 MB.
      */
     public S3OutputStream(AmazonS3 client, String bucket, String key, ObjectMetadata metadata, int partSize)
     {
+        this(client, null, bucket, key, metadata, partSize);
+    }
+
+
+    /**
+     *  Constructs an instance that uploads chunks on the specified threadpool,
+     *  with the specified part size (5 MB) and object metadata.
+     *  <p>
+     *  Warning: this variant does not limit the number of chunks waiting for
+     *  upload. If you produce faster than you can upload, you may run out of
+     *  memory.
+     *
+     *  @param  client          The S3 client that will be used for uploading.
+     *  @param  threadpool      Used to execute upload tasks.
+     *  @param  bucket          The bucket where the stream is to be written.
+     *  @param  key             The name of the file in that bucket.
+     *  @param  metadata        Object metadata. This can be used to provide content
+     *                          type or caller-defined headers. Any provided content
+     *                          length is ignored.
+     *  @param  partSize        Number of bytes to upload in a chunk. Must be >= 5 MB.
+     */
+    public S3OutputStream(AmazonS3 client, ExecutorService threadpool, String bucket, String key, ObjectMetadata metadata, int partSize)
+    {
+        this(client, threadpool, Integer.MAX_VALUE, bucket, key, metadata, partSize);
+    }
+
+
+    /**
+     *  Constructs an instance that uploads chunks on the specified threadpool,
+     *  with the specified part size (5 MB) and object metadata, limiting the
+     *  number of outstanding chunks.
+     *
+     *  @param  client          The S3 client that will be used for uploading.
+     *  @param  threadpool      Used to execute upload tasks.
+     *  @param  maxOutstanding  The maximum number of uncompleted upload tasks
+     *                          that are permitted.
+     *  @param  bucket          The bucket where the stream is to be written.
+     *  @param  key             The name of the file in that bucket.
+     *  @param  metadata        Object metadata. This can be used to provide content
+     *                          type or caller-defined headers. Any provided content
+     *                          length is ignored.
+     *  @param  partSize        Number of bytes to upload in a chunk. Must be >= 5 MB.
+     */
+    public S3OutputStream(AmazonS3 client, ExecutorService threadpool, int maxOutstanding, String bucket, String key, ObjectMetadata metadata, int partSize)
+    {
         this.client = client;
+        this.threadpool = threadpool;
+        this.maxOutstanding = maxOutstanding;
         this.bucket = bucket;
         this.key = key;
         this.metadata = metadata;
@@ -162,18 +208,18 @@ extends OutputStream
         if (buffer == null)
             return;
 
-        if (uploadToken == null)
+        if (upload == null)
         {
             logger.debug("buffer size is " + buffer.size() + "; using PutObject");
-            metadata.setContentLength(buffer.size());
-            client.putObject(bucket, key, buffer.asInputStream(), metadata);
+            int uploadSize = buffer.size();
+            ByteArrayInputStream uploadChunk = new ByteArrayInputStream(buffer.get(), 0, uploadSize);
+            metadata.setContentLength(uploadSize);
+            client.putObject(bucket, key, uploadChunk, metadata);
         }
         else
         {
-            writePart();
-            logger.debug("completing multi-part upload; token: " + uploadToken.substring(0, 16));
-            CompleteMultipartUploadRequest completeRequest = new CompleteMultipartUploadRequest(bucket, key, uploadToken, partTags);
-            client.completeMultipartUpload(completeRequest);
+            writePart(true);
+            upload.complete();
         }
 
         buffer = null;
@@ -252,17 +298,11 @@ extends OutputStream
      */
     public void abort()
     {
-        if (buffer == null)
-            return;
-
         buffer = null;
-
-        if (uploadToken == null)
-            return;
-
-        logger.debug("aborting multi-part upload; token: " + uploadToken.substring(0, 16));
-        AbortMultipartUploadRequest request = new AbortMultipartUploadRequest(bucket, key, uploadToken);
-        client.abortMultipartUpload(request);
+        if (upload != null)
+        {
+            upload.abort();
+        }
     }
 
 //----------------------------------------------------------------------------
@@ -285,17 +325,14 @@ extends OutputStream
             this.partSize = partSize;
         }
 
-        public InputStream asInputStream()
+        public byte[] get()
         {
-            int size = Math.min(partSize, count);
-            return new ByteArrayInputStream(buf, 0, size);
+            return buf;
         }
 
         /**
          *  Resets the stream to "remove" the bytes corresponding to an uploaded
          *  part while preserving bytes written after that part.
-         *  <p>
-         *  Note: relies on ByteArrrayInputStream exposing its internals.
          */
         @Override
         public void reset()
@@ -317,32 +354,23 @@ extends OutputStream
     {
         while (buffer.size() >= partSize)
         {
-            if (uploadToken == null)
+            if (upload == null)
             {
-                logger.debug("initiating multi-part upload");
-                InitiateMultipartUploadRequest initRequest = new InitiateMultipartUploadRequest(bucket, key, metadata);
-                InitiateMultipartUploadResult initResponse = client.initiateMultipartUpload(initRequest);
-                uploadToken = initResponse.getUploadId();
-                logger.debug("multi-part upload initiated; token: " + uploadToken.substring(0, 16));
+                upload = new MultipartUpload(client, threadpool, maxOutstanding);
+                upload.begin(bucket, key, metadata);
             }
-            writePart();
+            writePart(false);
         }
     }
 
 
-    private void writePart()
+    private void writePart(boolean isLast)
     {
-        partNumber++;
-        logger.debug("uploading part " + partNumber + "; token: " + uploadToken.substring(0, 16));
-        UploadPartRequest request = new UploadPartRequest()
-                                    .withBucketName(bucket)
-                                    .withKey(key)
-                                    .withUploadId(uploadToken)
-                                    .withPartNumber(partNumber)
-                                    .withPartSize(Math.min(partSize, buffer.size()))
-                                    .withInputStream(buffer.asInputStream());
-        UploadPartResult response = client.uploadPart(request);
-        partTags.add(response.getPartETag());
-        buffer.reset();
+        int uploadSize = Math.min(partSize, buffer.size());
+        if (uploadSize > 0)
+        {
+            upload.uploadPart(buffer.get(), 0, uploadSize, isLast);
+            buffer.reset();
+        }
     }
 }
