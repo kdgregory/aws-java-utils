@@ -303,6 +303,33 @@ public class S3IntegrationTest
         assertObjectDigest(key, digester.digest());
     }
 
+
+    @Test
+    public void testS3OutputStreamInlineLargeFileConcurrent() throws Exception
+    {
+        logger.info("testS3OutputStreamInlineLargeFileConcurrent: uploading to {}", key);
+
+        // the size of this buffer means that we won't neatly fit into the upload size
+        byte[] data = new byte[1024 * 1024 + 17];
+
+        ExecutorService threadpool = Executors.newFixedThreadPool(4);
+
+        // when this completes, the file should be fully uploaded
+        try (OutputStream out = new S3OutputStream(s3Client, threadpool, bucketName, key, new ObjectMetadata(), 5 * 1024 * 1024))
+        {
+            for (int ii = 0 ; ii < 14 ; ii++)
+            {
+                rnd.nextBytes(data);
+                digester.update(data);
+                out.write(data);
+            }
+        }
+
+        threadpool.shutdown();
+
+        assertObjectDigest(key, digester.digest());
+    }
+
 //----------------------------------------------------------------------------
 //  Support Code
 //----------------------------------------------------------------------------
