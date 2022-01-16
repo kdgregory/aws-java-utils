@@ -63,42 +63,9 @@ public class TestCloudWatchLogsUtil
                                  .withGroupAndStreams("baz");
         AWSLogs client = mock.getInstance();
 
+        // note: this is implemented with DescribeLogGroupsIterable; detailed testing happens there
         List<LogGroup> groups = CloudWatchLogsUtil.describeLogGroups(client, null);
         assertLogGroupNames(groups, "foo", "bar", "baz");
-
-        testLog.assertLogSize(0);
-    }
-
-
-    @Test
-    public void testDescribeLogGroupsWithPrefix() throws Exception
-    {
-        MockAWSLogs mock = new MockAWSLogs()
-                                 .withGroupAndStreams("foo")
-                                 .withGroupAndStreams("bar")
-                                 .withGroupAndStreams("baz");
-        AWSLogs client = mock.getInstance();
-
-        List<LogGroup> groups = CloudWatchLogsUtil.describeLogGroups(client, "ba");
-        assertLogGroupNames(groups, "bar", "baz");
-
-        testLog.assertLogSize(0);
-    }
-
-
-    @Test
-    public void testDescribeLogGroupsWithPagination() throws Exception
-    {
-        MockAWSLogs mock = new MockAWSLogs()
-                                 .withGroupAndStreams("foo")
-                                 .withGroupAndStreams("bar")
-                                 .withGroupAndStreams("baz")
-                                 .withPageSize(2);
-        AWSLogs client = mock.getInstance();
-
-        List<LogGroup> groups = CloudWatchLogsUtil.describeLogGroups(client, "ba");
-        assertLogGroupNames(groups, "bar", "baz");
-        mock.assertInvocationCount("describeLogGroups", 2);
 
         testLog.assertLogSize(0);
     }
@@ -112,56 +79,9 @@ public class TestCloudWatchLogsUtil
                                  .withGroupAndStreams("bar");
         AWSLogs client = mock.getInstance();
 
+        // note: this is implemented with DescribeLogStreamsIterable; detailed testing happens there
         List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "foo", null);
         assertLogStreamNames(streams, "argle", "bargle", "bazzle");
-
-        testLog.assertLogSize(0);
-    }
-
-
-    @Test
-    public void testDescribeLogStreamsWithPrefix() throws Exception
-    {
-        MockAWSLogs mock = new MockAWSLogs()
-                                 .withGroupAndStreams("foo", "argle", "bargle", "bazzle")
-                                 .withGroupAndStreams("bar");
-        AWSLogs client = mock.getInstance();
-
-        List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "foo", "ba");
-        assertLogStreamNames(streams, "bargle", "bazzle");
-
-        testLog.assertLogSize(0);
-    }
-
-
-    @Test
-    public void testDescribeLogStreamsWithPagination() throws Exception
-    {
-        MockAWSLogs mock = new MockAWSLogs()
-                                 .withGroupAndStreams("foo", "argle", "bargle", "bazzle")
-                                 .withGroupAndStreams("bar")
-                                 .withPageSize(2);
-        AWSLogs client = mock.getInstance();
-
-        List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "foo", "ba");
-        assertLogStreamNames(streams, "bargle", "bazzle");
-        mock.assertInvocationCount("describeLogStreams", 2);
-
-        testLog.assertLogSize(0);
-    }
-
-
-    @Test
-    public void testDescribeLogStreamsWithMissingGroup() throws Exception
-    {
-        MockAWSLogs mock = new MockAWSLogs()
-                                 .withGroupAndStreams("foo", "argle", "bargle", "bazzle")
-                                 .withGroupAndStreams("bar")
-                                 .withPageSize(2);
-        AWSLogs client = mock.getInstance();
-
-        List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "fribble", "ba");
-        assertLogStreamNames(streams);
 
         testLog.assertLogSize(0);
     }
@@ -691,6 +611,72 @@ public class TestCloudWatchLogsUtil
 
         testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log stream.*foo.*argle");
         testLog.assertLogEntry(1, Level.DEBUG, "timeout.*foo.*argle");
+    }
+
+
+    @Test
+    public void testRetrieveAllEventsSingleStreamHappyPath() throws Exception
+    {
+        // note: messages are out-of-order to assert that results are sorted
+        MockAWSLogs mock = new MockAWSLogs("foo", "argle")
+                           .withSharedMessage(1000, "first message")
+                           .withSharedMessage(3000, "third message")
+                           .withSharedMessage(2000, "second message");
+        AWSLogs client = mock.getInstance();
+
+        List<OutputLogEvent> result = CloudWatchLogsUtil.retrieveAllEvents(client, 3, 100, 100, "foo", "argle");
+        assertEquals(result,
+                     Arrays.asList(
+                         new OutputLogEvent().withTimestamp(1000L).withMessage("first message"),
+                         new OutputLogEvent().withTimestamp(2000L).withMessage("second message"),
+                         new OutputLogEvent().withTimestamp(3000L).withMessage("third message")));
+    }
+
+
+    @Test
+    public void testRetrieveAllEventsMultipleStreamsHappyPath() throws Exception
+    {
+        // note: messages are out-of-order to assert that results are sorted
+        MockAWSLogs mock = new MockAWSLogs()
+                           .withGroupAndStreams("foo", "argle", "bargle")
+                           .withMessage("foo", "argle", 1000, "first message")
+                           .withMessage("foo", "argle", 3000, "third message")
+                           .withMessage("foo", "bargle", 2000, "second message");
+        AWSLogs client = mock.getInstance();
+
+        List<OutputLogEvent> result = CloudWatchLogsUtil.retrieveAllEvents(client, 3, 100, 100, "foo", "argle", "bargle");
+        assertEquals(Arrays.asList(
+                         new OutputLogEvent().withTimestamp(1000L).withMessage("first message"),
+                         new OutputLogEvent().withTimestamp(2000L).withMessage("second message"),
+                         new OutputLogEvent().withTimestamp(3000L).withMessage("third message")),
+                     result);
+    }
+
+
+    @Test
+    public void testRetrieveAllEventsTimeout() throws Exception
+    {
+        // note: messages are out-of-order to assert that results are sorted
+        MockAWSLogs mock = new MockAWSLogs("foo", "argle")
+                           .withSharedMessage(1000, "first message")
+                           .withSharedMessage(3000, "third message")
+                           .withSharedMessage(2000, "second message");
+        AWSLogs client = mock.getInstance();
+
+        long start = System.currentTimeMillis();
+        List<OutputLogEvent> result = CloudWatchLogsUtil.retrieveAllEvents(client, 4, 250, 100, "foo", "argle");
+        assertEquals("returned available events",
+                     result,
+                     Arrays.asList(
+                         new OutputLogEvent().withTimestamp(1000L).withMessage("first message"),
+                         new OutputLogEvent().withTimestamp(2000L).withMessage("second message"),
+                         new OutputLogEvent().withTimestamp(3000L).withMessage("third message")));
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertTrue("slept for longer than 250 ms (was: " + elapsed + ")", elapsed > 250);
+
+        // the design of the mock will always return a "next" token, so count is doubled from what we expect
+        mock.assertInvocationCount("getLogEvents", 6);
     }
 
 //----------------------------------------------------------------------------

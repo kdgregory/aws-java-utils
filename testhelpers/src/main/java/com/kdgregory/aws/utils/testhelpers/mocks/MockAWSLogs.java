@@ -15,6 +15,9 @@
 package com.kdgregory.aws.utils.testhelpers.mocks;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -37,14 +40,17 @@ extends AbstractMock<AWSLogs>
     // protected variables may be changed by subclasses but are not inspected by tests;
     // private variables are for internal state
 
+    private int pageSize = Integer.MAX_VALUE / 2; // same size for all APIs; default is effectively infinite
+
     protected String uploadSequenceToken = UUID.randomUUID().toString();
 
-    public List<InputLogEvent> allMessages = new ArrayList<InputLogEvent>();
+    public List<InputLogEvent> allPutEvents = new ArrayList<InputLogEvent>();
 
     private Map<String,TreeSet<String>> groupsAndStreams = new TreeMap<String,TreeSet<String>>();
-    private TreeMap<Long,String> messages = new TreeMap<Long,String>();
-    private int pageSize = Integer.MAX_VALUE / 2; // effectively infinite
 
+    // log events may be either per-stream or shared by all streams
+    private ArrayList<OutputLogEvent> sharedEvents = new ArrayList<>();
+    private Map<String,Map<String,ArrayList<OutputLogEvent>>> perStreamEvents = new HashMap<>();
 
     /**
      *  Basic constructor: must call one or more of the configuration methods
@@ -84,16 +90,25 @@ extends AbstractMock<AWSLogs>
 
 
     /**
-     *  Adds a message to the list that are returned. Each message must have a
-     *  unique timestamp. There is no differentiation of messages by group or
-     *  stream.
+     *  Adds a message to the list for a single group and stream.
      */
-    public MockAWSLogs withMessage(long timestamp, String message)
+    public MockAWSLogs withMessage(String logGroupName, String logStreamName, long timestamp, String message)
     {
-        messages.put(Long.valueOf(timestamp), message);
+        storeEventForStream(logGroupName, logStreamName, timestamp, message);
         return this;
     }
 
+
+    /**
+     *  Adds a message to the shared messages list. Streams that do not have
+     *  stream-specific messages will return messages from the shared list.
+     */
+    public MockAWSLogs withSharedMessage(long timestamp, String message)
+    {
+        OutputLogEvent event = new OutputLogEvent().withTimestamp(timestamp).withMessage(message);
+        sharedEvents.add(event);
+        return this;
+    }
 
 
     /**
@@ -152,6 +167,38 @@ extends AbstractMock<AWSLogs>
         verifyGroup(groupName);
         if (! groupsAndStreams.get(groupName).contains(streamName))
             throw new ResourceNotFoundException("missing log stream: " + streamName);
+    }
+
+
+    protected void storeEventForStream(String logGroupName, String logStreamName, long timestamp, String message)
+    {
+        OutputLogEvent event = new OutputLogEvent().withTimestamp(timestamp).withMessage(message);
+
+        Map<String,ArrayList<OutputLogEvent>> eventsByStream = perStreamEvents.get(logGroupName);
+        if (eventsByStream == null)
+        {
+            eventsByStream = new HashMap<>();
+            perStreamEvents.put(logGroupName, eventsByStream);
+        }
+        ArrayList<OutputLogEvent> streamEvents = eventsByStream.get(logStreamName);
+        if (streamEvents == null)
+        {
+            streamEvents = new ArrayList<>();
+            eventsByStream.put(logStreamName, streamEvents);
+        }
+        streamEvents.add(event);
+    }
+
+
+    protected ArrayList<OutputLogEvent> retrieveEventsForStream(String logGroupName, String logStreamName)
+    {
+        Map<String,ArrayList<OutputLogEvent>> eventsByStream = perStreamEvents.get(logGroupName);
+        if (eventsByStream == null)
+            return sharedEvents;
+        ArrayList<OutputLogEvent> streamEvents = eventsByStream.get(logStreamName);
+        if (streamEvents == null)
+            return sharedEvents;
+        return streamEvents;
     }
 
 //----------------------------------------------------------------------------
@@ -270,7 +317,11 @@ extends AbstractMock<AWSLogs>
             throw new InvalidSequenceTokenException("received " + request.getSequenceToken() + ", expected " + uploadSequenceToken);
         }
 
-        allMessages.addAll(request.getLogEvents());
+        allPutEvents.addAll(request.getLogEvents());
+        for (InputLogEvent event : request.getLogEvents())
+        {
+            storeEventForStream(request.getLogGroupName(), request.getLogStreamName(), event.getTimestamp(), event.getMessage());
+        }
 
         uploadSequenceToken = UUID.randomUUID().toString();
         return new PutLogEventsResult().withNextSequenceToken(uploadSequenceToken);
@@ -281,33 +332,66 @@ extends AbstractMock<AWSLogs>
     {
         verifyStream(request.getLogGroupName(), request.getLogStreamName());
 
-        long startTimestamp = (request.getStartTime() == null)
-                            ? 0
+        boolean isForward = (request.isStartFromHead() != null) && request.isStartFromHead().booleanValue();
+
+        long minTimestamp   = (request.getStartTime() == null)
+                            ? -1
                             : request.getStartTime().longValue();
-        long endTimestamp   = (request.getEndTime() == null)
+        long maxTimestamp   = (request.getEndTime() == null)
                             ? Long.MAX_VALUE
                             : request.getEndTime().longValue();
 
-        List<OutputLogEvent> events = new ArrayList<OutputLogEvent>();
-        for (Map.Entry<Long,String> entry : messages.entrySet())
+        ArrayList<OutputLogEvent> events = retrieveEventsForStream(request.getLogGroupName(), request.getLogStreamName());
+
+        int index = 0;
+        if (request.getNextToken() != null)
         {
-            Long timestamp = entry.getKey();
-            String message = entry.getValue();
-            if ((startTimestamp <= timestamp.longValue()) && (timestamp.longValue() <= endTimestamp))
+            index = Integer.parseInt(request.getNextToken());
+        }
+        else if (isForward)
+        {
+            while ((index < events.size()) && (events.get(index).getTimestamp().longValue() < minTimestamp))
+                index++;
+        }
+        else
+        {
+            index = events.size() - 1;
+            while ((index > 0) && (events.get(index).getTimestamp().longValue() > maxTimestamp))
+                index--;
+        }
+
+        // TODO - check min/max timestamp
+        List<OutputLogEvent> result = new ArrayList<OutputLogEvent>();
+        if (isForward)
+        {
+            for (int count = pageSize ; (count > 0) && (index < events.size()) ; count--, index++)
             {
-                events.add(new OutputLogEvent().withTimestamp(timestamp).withMessage(message));
+                result.add(events.get(index));
+            }
+        }
+        else
+        {
+            for (int count = pageSize ; (count > 0) && (index >= 0) ; count--, index--)
+            {
+                result.add(events.get(index));
             }
         }
 
-        String nextToken = request.getNextToken();
-        int startOffset = (! StringUtil.isBlank(nextToken))
-                        ? Integer.parseInt(nextToken)
-                        : 0;
-        int endOffset = Math.min(events.size(), startOffset + pageSize);
+        // CloudWatch always returns events sorted in forward timestamp order
+        // note: due to dependency ordering, we can't use OutputLogEventComparator
+        Collections.sort(result, new Comparator<OutputLogEvent>()
+        {
+            @Override
+            public int compare(OutputLogEvent o1, OutputLogEvent o2)
+            {
+                return o1.getTimestamp().compareTo(o2.getTimestamp());
+            }
+        });
 
         return new GetLogEventsResult()
-               .withEvents(events.subList(startOffset, endOffset))
-               .withNextForwardToken(String.valueOf(endOffset));
+               .withEvents(result)
+               .withNextForwardToken(String.valueOf(index))
+               .withNextBackwardToken(String.valueOf(index));
     }
 
 

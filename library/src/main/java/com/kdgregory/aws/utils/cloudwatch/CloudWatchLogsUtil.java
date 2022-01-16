@@ -15,6 +15,7 @@
 package com.kdgregory.aws.utils.cloudwatch;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import org.apache.commons.logging.Log;
@@ -232,7 +233,7 @@ public class CloudWatchLogsUtil
     public static List<LogGroup> describeLogGroups(AWSLogs client, String prefix)
     {
         List<LogGroup> result = new ArrayList<LogGroup>();
-        for (LogGroup group : new LogGroupIterable(client, prefix))
+        for (LogGroup group : new DescribeLogGroupIterable(client, prefix))
         {
             result.add(group);
         }
@@ -251,7 +252,7 @@ public class CloudWatchLogsUtil
      */
     public static LogGroup describeLogGroup(AWSLogs client, String groupName)
     {
-        for (LogGroup group : new LogGroupIterable(client, groupName))
+        for (LogGroup group : new DescribeLogGroupIterable(client, groupName))
         {
             if (group.getLogGroupName().equals(groupName))
                 return group;
@@ -275,7 +276,7 @@ public class CloudWatchLogsUtil
     public static List<LogStream> describeLogStreams(AWSLogs client, String groupName, String prefix)
     {
         List<LogStream> result = new ArrayList<LogStream>();
-        for (LogStream stream : new LogStreamIterable(client, groupName, prefix))
+        for (LogStream stream : new DescribeLogStreamIterable(client, groupName, prefix))
         {
             result.add(stream);
         }
@@ -295,7 +296,7 @@ public class CloudWatchLogsUtil
      */
     public static LogStream describeLogStream(AWSLogs client, String groupName, String streamName)
     {
-        for (LogStream stream : new LogStreamIterable(client, groupName, streamName))
+        for (LogStream stream : new DescribeLogStreamIterable(client, groupName, streamName))
         {
             if (stream.getLogStreamName().equals(streamName))
                 return stream;
@@ -324,6 +325,7 @@ public class CloudWatchLogsUtil
         long timeoutAt = System.currentTimeMillis() + timeout;
         while (System.currentTimeMillis() < timeoutAt)
         {
+            // FIXME - handle throttling
             LogGroup group = describeLogGroup(client, groupName);
             if (group != null)
                 return group;
@@ -387,5 +389,58 @@ public class CloudWatchLogsUtil
 
         logger.warn("timeout expired waiting for CloudWatch log stream creation: " + groupName + "/" + streamName);
         return null;
+    }
+
+
+    /**
+     *  Repeatedly attempts to read all events from one or more streams, returning
+     *  either after the expected number of messages have been read or the specified
+     *  timeout elapses. This is useful for integration tests that write events,
+     *  because it will take several (perhaps 10s of) seconds before those events
+     *  are available for reading.
+     *  <p>
+     *  If the reading thread is interrupted, it will return whatever events it's
+     *  already read.
+     *  <p>
+     *  Events from all streams are combined together and sorted by timestamp. There
+     *  is no way to discover the source stream from the event.
+     *
+     *  @param  client          AWS client used to retrieve events.
+     *  @param  expectedCount   The expected number of events on the stream.
+     *  @param  timeout         Total amount of time to attempt reads, in milliseconds.
+     *  @param  delay           Milliseconds to sleep between attempts.
+     *  @param  logGroupName    The name of the log group to read.
+     *  @param  logStreamNames  Zero or more streams from the specified log group.
+     */
+    public static List<OutputLogEvent> retrieveAllEvents(AWSLogs client, int expectedCount, long timeout, long delay, String logGroupName, String... logStreamNames)
+    {
+        List<OutputLogEvent> result = new ArrayList<>(expectedCount);
+        long runUntil = System.currentTimeMillis() + timeout;
+        while (System.currentTimeMillis() < runUntil)
+        {
+            // each time through the loop we read all events from all streams, so throw away previous results
+            result.clear();
+            try
+            {
+                for (String logStreamName : logStreamNames)
+                {
+                    for (OutputLogEvent event : new LogStreamIterable(client, logGroupName, logStreamName))
+                    {
+                        result.add(event);
+                    }
+                }
+                if (result.size() >= expectedCount)
+                    break;
+
+                Thread.sleep(delay);
+            }
+            catch (InterruptedException ex)
+            {
+                break;
+            }
+        }
+
+        Collections.sort(result, new OutputLogEventComparator());
+        return result;
     }
 }
