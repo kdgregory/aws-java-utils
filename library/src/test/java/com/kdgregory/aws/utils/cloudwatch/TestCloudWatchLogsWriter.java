@@ -186,9 +186,9 @@ public class TestCloudWatchLogsWriter
 
         mock.assertInvocationCount("describeLogStreams",    1);
         mock.assertInvocationCount("putLogEvents",          2);
-        assertEquals("all messages written",                18000,      mock.allMessages.size());
-        assertEquals("first message written",               "17999",    mock.allMessages.get(0).getMessage());
-        assertEquals("last message written",                "0",        mock.allMessages.get(17999).getMessage());
+        assertEquals("all messages written",                18000,      mock.allPutEvents.size());
+        assertEquals("first message written",               "17999",    mock.allPutEvents.get(0).getMessage());
+        assertEquals("last message written",                "0",        mock.allPutEvents.get(17999).getMessage());
         assertEquals("last batch size",                     8000,       mock.getLastPutEvents().size());
         assertEquals("last batch first message",            "7999",     mock.getLastPutEvents().get(0).getMessage());
         assertEquals("last batch last message",             "0",        mock.getLastPutEvents().get(7999).getMessage());
@@ -225,9 +225,9 @@ public class TestCloudWatchLogsWriter
 
         mock.assertInvocationCount("describeLogStreams",    1);
         mock.assertInvocationCount("putLogEvents",          2);
-        assertEquals("all messages written",                2000,       mock.allMessages.size());
-        assertRegex("first message written",                ".* 1999",  mock.allMessages.get(0).getMessage());
-        assertRegex("last message written",                 ".* 0000",  mock.allMessages.get(1999).getMessage());
+        assertEquals("all messages written",                2000,       mock.allPutEvents.size());
+        assertRegex("first message written",                ".* 1999",  mock.allPutEvents.get(0).getMessage());
+        assertRegex("last message written",                 ".* 0000",  mock.allPutEvents.get(1999).getMessage());
         assertEquals("last batch size",                     976,        mock.getLastPutEvents().size());
         assertRegex("last batch first message",             ".* 0975",  mock.getLastPutEvents().get(0).getMessage());
         assertRegex("last batch last message",              ".* 0000",  mock.getLastPutEvents().get(975).getMessage());
@@ -261,9 +261,9 @@ public class TestCloudWatchLogsWriter
 
         mock.assertInvocationCount("describeLogStreams",    1);
         mock.assertInvocationCount("putLogEvents",          2);
-        assertEquals("all messages written",                1500,       mock.allMessages.size());
-        assertEquals("first message written",               "1499",     mock.allMessages.get(0).getMessage());
-        assertEquals("last message written",                "0",        mock.allMessages.get(1499).getMessage());
+        assertEquals("all messages written",                1500,       mock.allPutEvents.size());
+        assertEquals("first message written",               "1499",     mock.allPutEvents.get(0).getMessage());
+        assertEquals("last message written",                "0",        mock.allPutEvents.get(1499).getMessage());
         assertEquals("last batch size",                     60,         mock.getLastPutEvents().size());
         assertEquals("last batch first message",            "59",       mock.getLastPutEvents().get(0).getMessage());
         assertEquals("last batch last message",             "0",        mock.getLastPutEvents().get(59).getMessage());
@@ -335,7 +335,7 @@ public class TestCloudWatchLogsWriter
 
         mock.assertInvocationCount("describeLogStreams",    1);
         mock.assertInvocationCount("putLogEvents",          1);
-        assertEquals("message written (count)",             0,          mock.allMessages.size());
+        assertEquals("message written (count)",             0,          mock.allPutEvents.size());
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
         assertEquals("stats: batch count",                  0,          writer.getBatchCount());
@@ -367,7 +367,7 @@ public class TestCloudWatchLogsWriter
 
         mock.assertInvocationCount("describeLogStreams",    1);
         mock.assertInvocationCount("putLogEvents",          0);
-        assertEquals("message written (count)",             0,          mock.allMessages.size());
+        assertEquals("message written (count)",             0,          mock.allPutEvents.size());
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
         assertEquals("stats: batch count",                  0,          writer.getBatchCount());
@@ -399,7 +399,7 @@ public class TestCloudWatchLogsWriter
 
         mock.assertInvocationCount("describeLogStreams",    1);
         mock.assertInvocationCount("putLogEvents",          1);
-        assertEquals("message written (count)",             0,          mock.allMessages.size());
+        assertEquals("message written (count)",             0,          mock.allPutEvents.size());
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
         assertEquals("stats: batch count",                  0,          writer.getBatchCount());
@@ -437,7 +437,7 @@ public class TestCloudWatchLogsWriter
 
         mock.assertInvocationCount("describeLogStreams",    1);
         mock.assertInvocationCount("putLogEvents",          1);
-        assertEquals("all messages passed to putLogEvents", 10,         mock.allMessages.size());
+        assertEquals("all messages passed to putLogEvents", 10,         mock.allPutEvents.size());
 
         assertEquals("stats: flush count",                  1,          writer.getFlushCount());
         assertEquals("stats: batch count",                  1,          writer.getBatchCount());

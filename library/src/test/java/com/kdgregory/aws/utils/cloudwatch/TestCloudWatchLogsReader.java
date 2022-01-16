@@ -54,9 +54,9 @@ public class TestCloudWatchLogsReader
     public void testBasicOperation() throws Exception
     {
         MockAWSLogs mock = new MockAWSLogs("foo", "bar")
-                                 .withMessage(10, "first")
-                                 .withMessage(20, "second")
-                                 .withMessage(30, "third");
+                                 .withSharedMessage(10, "first")
+                                 .withSharedMessage(20, "second")
+                                 .withSharedMessage(30, "third");
 
         CloudWatchLogsReader reader = new CloudWatchLogsReader(mock.getInstance(), "foo", "bar");
         List<OutputLogEvent> events = reader.retrieve();
@@ -79,9 +79,9 @@ public class TestCloudWatchLogsReader
     public void testAlternateConstructor() throws Exception
     {
         MockAWSLogs mock = new MockAWSLogs("foo", "bar")
-                                 .withMessage(10, "first")
-                                 .withMessage(20, "second")
-                                 .withMessage(30, "third");
+                                 .withSharedMessage(10, "first")
+                                 .withSharedMessage(20, "second")
+                                 .withSharedMessage(30, "third");
 
         AWSLogs client = mock.getInstance();
         List<LogStream> streams = CloudWatchLogsUtil.describeLogStreams(client, "foo", "ba");
@@ -102,9 +102,9 @@ public class TestCloudWatchLogsReader
     public void testPaginatedRetrieve() throws Exception
     {
         MockAWSLogs mock = new MockAWSLogs("foo", "bar")
-                                 .withMessage(10, "first")
-                                 .withMessage(20, "second")
-                                 .withMessage(30, "third")
+                                 .withSharedMessage(10, "first")
+                                 .withSharedMessage(20, "second")
+                                 .withSharedMessage(30, "third")
                                  .withPageSize(1);
 
         CloudWatchLogsReader reader = new CloudWatchLogsReader(mock.getInstance(), "foo", "bar");
@@ -123,9 +123,9 @@ public class TestCloudWatchLogsReader
     public void testTimeRange() throws Exception
     {
         MockAWSLogs mock = new MockAWSLogs("foo", "bar")
-                                 .withMessage(10, "first")
-                                 .withMessage(20, "second")
-                                 .withMessage(30, "third");
+                                 .withSharedMessage(10, "first")
+                                 .withSharedMessage(20, "second")
+                                 .withSharedMessage(30, "third");
 
         CloudWatchLogsReader reader = new CloudWatchLogsReader(mock.getInstance(), "foo", "bar")
                                       .withTimeRange(15L, 25L);
@@ -220,8 +220,8 @@ public class TestCloudWatchLogsReader
     public void testBatchLogging() throws Exception
     {
         MockAWSLogs mock = new MockAWSLogs("foo", "bar")
-                                 .withMessage(10, "first")
-                                 .withMessage(20, "second");
+                                 .withSharedMessage(10, "first")
+                                 .withSharedMessage(20, "second");
 
         CloudWatchLogsReader reader = new CloudWatchLogsReader(mock.getInstance(), "foo", "bar")
                                       .withRetrieveEntryLogging(true)

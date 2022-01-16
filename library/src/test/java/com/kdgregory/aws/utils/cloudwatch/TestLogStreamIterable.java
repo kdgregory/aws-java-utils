@@ -59,9 +59,9 @@ public class TestLogStreamIterable
     public void testForwardOperationHappyPath() throws Exception
     {
         MockAWSLogs mock = new MockAWSLogs("foo", "bar")
-                           .withMessage(10, "first")
-                           .withMessage(20, "second")
-                           .withMessage(30, "third");
+                           .withSharedMessage(10, "first")
+                           .withSharedMessage(20, "second")
+                           .withSharedMessage(30, "third");
 
         LogStreamIterable iterable = new LogStreamIterable(mock.getInstance(), "foo", "bar");
         Iterator<OutputLogEvent> itx = iterable.iterator();
@@ -85,9 +85,9 @@ public class TestLogStreamIterable
     public void testForwardOperationPaginated() throws Exception
     {
         MockAWSLogs mock = new MockAWSLogs("foo", "bar")
-                           .withMessage(10, "first")
-                           .withMessage(20, "second")
-                           .withMessage(30, "third")
+                           .withSharedMessage(10, "first")
+                           .withSharedMessage(20, "second")
+                           .withSharedMessage(30, "third")
                            .withPageSize(2);
 
         LogStreamIterable iterable = new LogStreamIterable(mock.getInstance(), "foo", "bar");
@@ -112,9 +112,9 @@ public class TestLogStreamIterable
     public void testForwardOperationStartingAt() throws Exception
     {
         MockAWSLogs mock = new MockAWSLogs("foo", "bar")
-                           .withMessage(10, "first")
-                           .withMessage(20, "second")
-                           .withMessage(30, "third");
+                           .withSharedMessage(10, "first")
+                           .withSharedMessage(20, "second")
+                           .withSharedMessage(30, "third");
 
         LogStreamIterable iterable = new LogStreamIterable(mock.getInstance(), "foo", "bar")
                                      .withStartingAt(new Date(20));
@@ -138,9 +138,9 @@ public class TestLogStreamIterable
     public void testBackwardOperationHappyPath() throws Exception
     {
         MockAWSLogs mock = new MockAWSLogs("foo", "bar")
-                           .withMessage(10, "first")
-                           .withMessage(20, "second")
-                           .withMessage(30, "third");
+                           .withSharedMessage(10, "first")
+                           .withSharedMessage(20, "second")
+                           .withSharedMessage(30, "third");
 
         LogStreamIterable iterable = new LogStreamIterable(mock.getInstance(), "foo", "bar")
                                      .withIterationDirection(IterationDirection.BACKWARD);
@@ -165,9 +165,9 @@ public class TestLogStreamIterable
     public void testBackwardOperationPaginated() throws Exception
     {
         MockAWSLogs mock = new MockAWSLogs("foo", "bar")
-                           .withMessage(10, "first")
-                           .withMessage(20, "second")
-                           .withMessage(30, "third")
+                           .withSharedMessage(10, "first")
+                           .withSharedMessage(20, "second")
+                           .withSharedMessage(30, "third")
                            .withPageSize(2);
 
         LogStreamIterable iterable = new LogStreamIterable(mock.getInstance(), "foo", "bar")
@@ -193,9 +193,9 @@ public class TestLogStreamIterable
     public void testBackwardOperationStartingAt() throws Exception
     {
         MockAWSLogs mock = new MockAWSLogs("foo", "bar")
-                           .withMessage(10, "first")
-                           .withMessage(20, "second")
-                           .withMessage(30, "third");
+                           .withSharedMessage(10, "first")
+                           .withSharedMessage(20, "second")
+                           .withSharedMessage(30, "third");
 
         LogStreamIterable iterable = new LogStreamIterable(mock.getInstance(), "foo", "bar")
                                      .withIterationDirection(IterationDirection.BACKWARD)
@@ -254,9 +254,9 @@ public class TestLogStreamIterable
                     return super.getLogEvents(request);
             }
         }
-        .withMessage(10, "first")
-        .withMessage(20, "second")
-        .withMessage(30, "third");
+        .withSharedMessage(10, "first")
+        .withSharedMessage(20, "second")
+        .withSharedMessage(30, "third");
 
         // use explicit retry parameters so that this doesn't take a long time
         LogStreamIterable iterable = new LogStreamIterable(mock.getInstance(), "foo", "bar")
