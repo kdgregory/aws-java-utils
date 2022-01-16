@@ -23,7 +23,7 @@ Include this JAR in your project dependencies. For example, with Maven:
 <dependency>
     <groupId>com.kdgregory.aws</groupId>
     <artifactId>aws-java-utils</artifactId>
-    <version>${cka-utils.version}</version>
+    <version>${aws-utils.version}</version>
 </dependency>
 ```
 
@@ -53,11 +53,14 @@ clients are intended to be long-lived, and shared between multiple threads.
 ### Logging
 
 This library uses [commons-logging](http://commons.apache.org/proper/commons-logging/) version
-1.1.3, which is also a dependency of the AWS SDK. Unlike the SDK, it does not have establish a
-transitive dependency on commons-logging. If you want to use a logging framework that's not
-supported by commons-logging, you'll need to explicitly exclude the latter from the SDK. The
-[example POM](https://github.com/kdgregory/aws-java-utils/blob/dev-README/examples/pom.xml#L71)
-shows how to do this for SLF4J/Logback.
+1.1.3, which is also a dependency of the AWS SDK. _Unlike_ the SDK, it does not establish a
+transitive dependency on commons-logging. If you use [Logback](https://www.slf4j.org/legacy.html)
+or [Log4J 2.x](https://logging.apache.org/log4j/2.x/log4j-jcl/index.html), you can instead
+include that library's "bridge" JAR in your deployment rather than the commons-logging JAR.
+
+However, if you do that, you'll need to break the transitive dependency from the AWS SDK. See
+the [example POM](https://github.com/kdgregory/aws-java-utils/blob/dev-README/examples/pom.xml#L71)
+for how to do that with Maven.
 
 > **Warning:** if you exclude the SDK's transitive dependency and do not provide a replacement,
   some operations will throw a `NoClassDefFoundError`.
