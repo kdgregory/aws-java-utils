@@ -1,5 +1,11 @@
 # Change History
 
-## 1.11.0 (TBD)
+## 1.0.0 (TBD)
 
-Initial release.
+CloudWatch: MetricReporter, Logs reader/writer/create/delete/describe
+
+Kinesis: reader, writer, create, delete, describe.
+
+IAM: utils, PolicyBuilder
+
+S3: MultipartUpload, S3OutputStream, ObjectListIterable
