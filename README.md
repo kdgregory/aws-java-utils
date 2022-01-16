@@ -112,7 +112,7 @@ executor will depend on the number and frequency of background operations, but i
 general you don't need many threads: each operation takes 50-100 ms.
 
 For classes that support batched operations, the executor must be an instance of
-`ScheduledExecutorService`, and the class will also be constructed with a scheduling
+`ScheduledExecutorService`, and the library class must be constructed with a scheduling
 interval. The library class will perform some action (typically writing a batch of
 messages) every time the interval expires. If there is nothing to do, the background
 operation will still run but won't contact the service.
@@ -136,28 +136,30 @@ is appropriate for your application.
 This project contains three directories:
 
 * `library` is the main library of utility classes.
-* `testhelpers` contains mock objects and other classes to support testing the library. This
-  will be published in case it's useful for anyone else.
+* `testhelpers` contains mock objects and other classes to support testing the library.
+  While you are free to use this module to test your own applications, be aware that
+  it does _not_ guarantee backwards compatibiliy. Any class may change without notice.
 * `examples` contains programs that demonstrate the library.
-* `integration-tests` are tests that exercise the library classes against actual AWS services.
-  *Beware:* running these tests will incur service charges.
+* `integration-tests` are tests that exercise the library classes against actual AWS
+  services.  *Beware:* running these tests will incur service charges.
 
 
 ## Versioning
 
 I follow the standard `MAJOR.MINOR.PATCH` versioning scheme:
 
-* `MAJOR` tracks the AWS SDK major version (always 1)
-* `MINOR` tracks the AWS SDK minor version (always 11).
+* `MAJOR` is 1, and not expected to change.
+* `MINOR` is incremented for additions of significant functionality, such as support
+  for a new service.
 * `PATCH` is incremented whenever functionality is added/fixed.
 
-I will not make breaking API changes, unless such changes represent a complete misunderstanding on my
-part about how the service operates. In that case, I will deprecate the relevant classes/methods for
-one release, and update their JavaDoc to warn against their use.
+I will not make breaking API changes, unless such changes represent a complete misunderstanding
+on my part about how the service operates. In that case, I will deprecate the relevant
+classes/methods for one release, and update their JavaDoc to warn against their use.
   
-Not all versions will be released to Maven Central. I may choose to make release (non-snapshot) versions for
-development testing, or as interim steps of a bigger piece of functionality. However, all release versions
-are tagged in source control, whether or not available on Maven Central.
+Not all versions will be released to Maven Central. I may choose to make release (non-snapshot)
+versions for development testing, or as interim steps of a bigger piece of functionality. However,
+all release versions are tagged in source control, whether or not available on Maven Central.
 
 
 ## Source Control
@@ -167,9 +169,8 @@ functional, but may not be "complete" (for some definition of that word). They m
 "snapshot" or release builds. Trunk will never be rebased; once a commit is made there it's
 part of history for better or worse.
 
-Development takes place on a `dev-MAJOR.MINOR.PATCH` branch; these branches are deleted
-once their content has been merged into `master`. *BEWARE*: these branches may be rebased
-as I see fit.
+Development takes place on a `dev-XXX` branch; these branches are deleted once their content
+has been merged into `master`. *BEWARE*: these branches may be rebased as I see fit.
 
 Each "release" version is tagged with `release-MAJOR.MINOR.PATCH`, whether or not it was
 uploaded to Maven Central.
