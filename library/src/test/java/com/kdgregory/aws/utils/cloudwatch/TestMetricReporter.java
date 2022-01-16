@@ -375,7 +375,7 @@ public class TestMetricReporter
                 assertEquals("flush called only once with messages", 1, messageCounters.get(message).intValue());
         }
 
-        executor.shutdown();
+        executor.shutdownNow();
     }
 
 
@@ -417,6 +417,6 @@ public class TestMetricReporter
                 assertEquals("exception should only be reported once", 1, messageCounters.get(message).intValue());
         }
 
-        executor.shutdown();
+        executor.shutdownNow();
     }
 }

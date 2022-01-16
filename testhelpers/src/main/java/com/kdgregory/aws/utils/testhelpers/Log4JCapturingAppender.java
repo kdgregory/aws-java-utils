@@ -59,6 +59,21 @@ extends AppenderSkeleton
     {
         events.clear();
     }
+    
+    
+    public synchronized String dump()
+    {
+        StringBuilder buf = new StringBuilder(8192);
+        
+        for (LoggingEvent event : events)
+        {
+            buf.append(event.getTimeStamp()).append("   ")
+               .append(event.getLevel()).append("   ")
+               .append(event.getMessage()).append("\n");
+        }
+        
+        return buf.toString();
+    }
 
 //----------------------------------------------------------------------------
 //  AppenderSkeleton overrides

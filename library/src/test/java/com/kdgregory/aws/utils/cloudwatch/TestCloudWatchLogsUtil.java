@@ -129,11 +129,11 @@ public class TestCloudWatchLogsUtil
 
         long start = System.currentTimeMillis();
         LogGroup group = CloudWatchLogsUtil.waitUntilCreated(client, "biff", 100, 10);
-        long finish = System.currentTimeMillis();
+        long elapsed = System.currentTimeMillis() - start;
 
         assertNull("did not find log group",            group);
         assertTrue("made multiple describe attempts",               mock.getInvocationCount("describeLogGroups") > 1);
-        assertInRange("waited between attempts",        80, 120,    (finish - start));
+        assertInRange("waited between attempts",        80, 120,    elapsed);
 
         testLog.assertLogEntry(0, Level.WARN, "timeout expired.*log group.*biff");
     }
@@ -197,11 +197,11 @@ public class TestCloudWatchLogsUtil
 
         long start = System.currentTimeMillis();
         LogStream stream = CloudWatchLogsUtil.waitUntilCreated(client, "foo", "biff", 100, 10);
-        long finish = System.currentTimeMillis();
+        long elapsed = System.currentTimeMillis() - start;
 
         assertNull("did not find log stream", stream);
         assertTrue("made multiple describe attempts", mock.getInvocationCount("describeLogStreams") > 1);
-        assertInRange("waited between attempts", 80, 120, (finish - start));
+        assertInRange("waited between attempts", 80, 120, elapsed);
 
         testLog.assertLogEntry(0, Level.WARN, "timeout expired.*log stream.*biff");
     }
@@ -309,12 +309,13 @@ public class TestCloudWatchLogsUtil
 
         long start = System.currentTimeMillis();
         LogGroup group = CloudWatchLogsUtil.createLogGroup(client, "bar", 200);
-        long finish = System.currentTimeMillis();
+
+        long elapsed = System.currentTimeMillis() - start;
 
         assertNull("did not return anything",                           group);
         mock.assertInvocationCount("createLogGroup",        1);
         assertTrue("made multiple describes",                           mock.getInvocationCount("describeLogGroups") > 1);
-        assertInRange("waited between describes",           160, 210,   (finish - start));
+        assertInRange("waited between describes",           170, 230,   elapsed);
 
         testLog.assertLogEntry(0, Level.DEBUG, "creating.*log group.*bar");
         testLog.assertLogEntry(1, Level.WARN, "timeout expired.*log group.*bar");
@@ -387,14 +388,14 @@ public class TestCloudWatchLogsUtil
 
         long start = System.currentTimeMillis();
         LogStream stream = CloudWatchLogsUtil.createLogStream(client, "foo", "bargle", 200);
-        long finish = System.currentTimeMillis();
+        long elapsed = System.currentTimeMillis() - start;
 
         assertNull("did not return LogStream object",                   stream);
         mock.assertInvocationCount("describeLogGroups",     1);
         assertTrue("multiple describeLogStreams calls",                 mock.getInvocationCount("describeLogStreams") > 2);
         mock.assertInvocationCount("createLogGroup",        0);
         mock.assertInvocationCount("createLogStream",       1);
-        assertInRange("waited between describes",           160, 210,   (finish - start));
+        assertInRange("waited between describes",           170, 230,   elapsed);
 
         testLog.assertLogEntry(0, Level.DEBUG, "creating.*log stream.*foo.*bargle");
         testLog.assertLogEntry(1, Level.WARN, "timeout expired.*log stream.*bargle");
@@ -506,11 +507,11 @@ public class TestCloudWatchLogsUtil
 
         long start = System.currentTimeMillis();
         assertFalse(CloudWatchLogsUtil.deleteLogGroup(client, "foo", 200));
-        long finish = System.currentTimeMillis();
+        long elapsed = System.currentTimeMillis() - start;
 
         mock.assertInvocationCount("deleteLogGroup",        1);
         mock.assertInvocationCount("describeLogGroups",     4);
-        assertInRange("waited between describes",           150, 250,   (finish - start));
+        assertInRange("waited between describes",           170, 230,   elapsed);
 
         testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log group.*foo");
         testLog.assertLogEntry(1, Level.WARN, "timeout.*foo");
@@ -603,11 +604,11 @@ public class TestCloudWatchLogsUtil
 
         long start = System.currentTimeMillis();
         assertFalse(CloudWatchLogsUtil.deleteLogStream(client, "foo", "argle", 200));
-        long finish = System.currentTimeMillis();
+        long elapsed = System.currentTimeMillis() - start;
 
         mock.assertInvocationCount("deleteLogStream",           1);
         mock.assertInvocationCount("describeLogStreams",        4);
-        assertInRange("waited between describes",               150, 250,   (finish - start));
+        assertInRange("waited between describes",               170, 230,   elapsed);
 
         testLog.assertLogEntry(0, Level.DEBUG, "deleting.*log stream.*foo.*argle");
         testLog.assertLogEntry(1, Level.DEBUG, "timeout.*foo.*argle");
