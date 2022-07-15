@@ -43,7 +43,7 @@
         <jdk.version>1.8</jdk.version>
 
         <!--  this is the minimum SDK version we support -->
-        <aws-sdk.version>1.11.250</aws-sdk.version>
+        <aws-sdk.version>1.12.261</aws-sdk.version>
 
         <!-- these are transitive dependencies of the SDK that are used by us directly -->
         <!-- version is dependent on SDK version above -->
